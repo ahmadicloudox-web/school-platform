@@ -1,28 +1,37 @@
-// src/components/admin/GradesManager/components/GradeSummary.jsx
+// src/components/teacher/components/TeacherGradeSummary.jsx
 import React, { memo, useMemo } from 'react';
-import { calculateTotal, getTotalMaxForSubject } from '../utils/gradeCalculations';
+import { GRADE_FIELDS } from '../../admin/GradesManager/constants/gradeFields';
 
-const GradeSummary = memo(({ 
+const TeacherGradeSummary = memo(({ 
   students, 
   grades, 
   selectedSubject, 
   selectedSemester,
-  selectedClass,
-  gradingConfig 
+  academicYear,
+  gradingConfig,
+  getSubjectMaxTotal
 }) => {
   const summary = useMemo(() => {
     if (!selectedSubject || students.length === 0) {
       return { count: students.length, average: 0, max: 0, min: 0, maxTotal: 0 };
     }
 
-    const maxTotal = getTotalMaxForSubject(selectedSubject, selectedClass, gradingConfig);
+    const maxTotal = getSubjectMaxTotal();
     const totals = students.map(student => {
       const grade = grades.find(g => 
         g.studentId === student.id && 
         g.subjectId === selectedSubject && 
-        g.semester === selectedSemester
+        g.semester === selectedSemester &&
+        g.academicYear === academicYear
       );
-      return grade ? calculateTotal(grade, selectedSubject, gradingConfig) : 0;
+      
+      let total = 0;
+      if (grade) {
+        GRADE_FIELDS.forEach(f => {
+          total += (grade[f.key] || 0);
+        });
+      }
+      return total;
     });
 
     const validTotals = totals.filter(t => t > 0);
@@ -38,7 +47,7 @@ const GradeSummary = memo(({
       maxTotal: maxTotal,
       percentage: maxTotal > 0 ? (average / maxTotal * 100).toFixed(1) : 0
     };
-  }, [students, grades, selectedSubject, selectedSemester, selectedClass, gradingConfig]);
+  }, [students, grades, selectedSubject, selectedSemester, academicYear, getSubjectMaxTotal]);
 
   if (!selectedSubject || students.length === 0) return null;
 
@@ -74,6 +83,6 @@ const GradeSummary = memo(({
   );
 });
 
-GradeSummary.displayName = 'GradeSummary';
+TeacherGradeSummary.displayName = 'TeacherGradeSummary';
 
-export default GradeSummary;
+export default TeacherGradeSummary;

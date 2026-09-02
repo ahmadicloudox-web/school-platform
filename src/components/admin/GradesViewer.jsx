@@ -1,5 +1,5 @@
 // src/components/admin/GradesViewer.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../services/firebase';
 import { 
   collection, doc, getDocs, getDoc, addDoc, updateDoc, 
@@ -8,8 +8,9 @@ import {
 import { 
   FileText, Search, Loader2, Users, School, BookOpen, 
   Printer, Calendar, Filter, RefreshCw, Eye, ChevronDown,
-  AlertCircle, CheckCircle  // ✅ أضف هذين المكونين هنا
+  AlertCircle, CheckCircle
 } from 'lucide-react';
+import { getTotalMaxForSubject, getGradeFieldsForSubject, GRADE_FIELDS } from './GradesManager/constants/gradeFields';
 
 // ============ دوال مساعدة ============
 const calculateTotal = (grades) => {
@@ -34,139 +35,6 @@ const getGrade = (percentage) => {
   return { label: 'ضعيف', key: 'F', color: 'text-rose-400 bg-rose-500/10' };
 };
 
-const GRADE_FIELDS = [
-  { key: 'dailyExam1', label: 'امتحان يومي 1', max: 10, color: 'blue-400' },
-  { key: 'participation1', label: 'مشاركة 1', max: 10, color: 'emerald-400' },
-  { key: 'midtermExam', label: 'امتحان شهري', max: 20, color: 'amber-400' },
-  { key: 'dailyExam2', label: 'امتحان يومي 2', max: 10, color: 'purple-400' },
-  { key: 'participation2', label: 'مشاركة 2', max: 10, color: 'rose-400' },
-  { key: 'finalExam', label: 'امتحان فصلي', max: 40, color: 'orange-400' }
-];
-
-// ============ دالة طباعة الكشف ============
-const printGradeSheet = (classData, studentsData, gradesData, subjectData, semesterData, academicYearData) => {
-  const printWindow = window.open('', '_blank', 'width=1000,height=800');
-  if (!printWindow) return;
-  
-  const rows = studentsData.map(student => {
-    const grade = gradesData.find(g => 
-      g.studentId === student.id && 
-      g.subjectId === subjectData?.id && 
-      g.semester === semesterData &&
-      g.academicYear === academicYearData
-    );
-    
-    const fields = {
-      dailyExam1: grade?.dailyExam1 || 0,
-      participation1: grade?.participation1 || 0,
-      midtermExam: grade?.midtermExam || 0,
-      dailyExam2: grade?.dailyExam2 || 0,
-      participation2: grade?.participation2 || 0,
-      finalExam: grade?.finalExam || 0
-    };
-    const total = calculateTotal(fields);
-    const percentage = (total / 100) * 100;
-    const gradeInfo = getGrade(percentage);
-    
-    return `
-      <tr>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${student.fullName}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.dailyExam1}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.participation1}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.midtermExam}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.dailyExam2}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.participation2}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.finalExam}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #2e7d32;">${total}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
-          <span style="padding: 2px 8px; border-radius: 12px; background: ${percentage >= 90 ? '#e8f5e9' : percentage >= 80 ? '#e3f2fd' : percentage >= 70 ? '#fff3e0' : percentage >= 60 ? '#fff8e1' : '#ffebee'}; color: ${percentage >= 90 ? '#2e7d32' : percentage >= 80 ? '#1565c0' : percentage >= 70 ? '#e65100' : percentage >= 60 ? '#f57f17' : '#c62828'};">
-            ${gradeInfo.label}
-          </span>
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  const semesterLabel = semesterData === 1 ? 'الفصل الدراسي الأول' : 'الفصل الدراسي الثاني';
-  const className = classData?.name || 'غير محدد';
-  const subjectName = subjectData?.name || 'غير محدد';
-  const schoolName = 'مدرستك الثانوية';
-
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html dir="rtl">
-      <head>
-        <title>كشف العلامات - ${className}</title>
-        <meta charset="UTF-8">
-        <style>
-          body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #fff; margin: 0; }
-          .container { max-width: 1100px; margin: 0 auto; direction: rtl; }
-          .header { text-align: center; border-bottom: 3px solid #1a237e; padding-bottom: 15px; margin-bottom: 20px; }
-          .school-name { font-size: 24px; font-weight: bold; color: #1a237e; }
-          .title { font-size: 20px; font-weight: bold; margin: 10px 0; color: #1a237e; }
-          .info { text-align: center; color: #555; font-size: 14px; margin-bottom: 15px; }
-          .info span { margin: 0 10px; }
-          table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
-          th { background: #1a237e; color: white; padding: 10px 8px; border: 1px solid #1a237e; text-align: center; font-weight: bold; }
-          td { padding: 8px; border: 1px solid #ddd; text-align: center; }
-          tr:nth-child(even) { background: #f8f9fa; }
-          .footer { text-align: center; margin-top: 20px; padding-top: 15px; border-top: 2px solid #1a237e; font-size: 12px; color: #888; }
-          .sub-title { font-size: 14px; font-weight: bold; color: #1a237e; margin: 5px 0; }
-          @media print { body { padding: 10px; } .no-print { display: none; } }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <div class="header">
-            <div class="school-name">${schoolName}</div>
-            <div class="title">كشف العلامات</div>
-            <div class="sub-title">الصف: ${className}</div>
-            <div class="info">
-              <span>📚 المادة: ${subjectName}</span>
-              <span>📅 الفصل: ${semesterLabel}</span>
-              <span>📆 العام الدراسي: ${academicYearData}</span>
-              <span>👨‍🎓 عدد الطلاب: ${studentsData.length}</span>
-            </div>
-          </div>
-          <table>
-            <thead>
-              <tr>
-                <th>اسم الطالب</th>
-                <th>امتحان يومي 1<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>مشاركة 1<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>امتحان شهري<br><span style="font-size:10px;font-weight:normal;">(20)</span></th>
-                <th>امتحان يومي 2<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>مشاركة 2<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>امتحان فصلي<br><span style="font-size:10px;font-weight:normal;">(40)</span></th>
-                <th>المجموع<br><span style="font-size:10px;font-weight:normal;">(100)</span></th>
-                <th>التقدير</th>
-              </tr>
-            </thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <div style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; display: flex; justify-content: space-around; flex-wrap: wrap;">
-            <div><strong>عدد الطلاب:</strong> ${studentsData.length}</div>
-            <div><strong>المعدل العام:</strong> ${studentsData.length > 0 ? (studentsData.reduce((sum, s) => {
-              const grade = gradesData.find(g => g.studentId === s.id && g.subjectId === subjectData?.id && g.semester === semesterData && g.academicYear === academicYearData);
-              return sum + (grade ? calculateTotal(grade) : 0);
-            }, 0) / studentsData.length).toFixed(1) : 0}</div>
-          </div>
-          <div class="footer">
-            تم إنشاء هذا التقرير بواسطة المنصة التعليمية الذكية<br>
-            تاريخ الطباعة: ${new Date().toLocaleDateString('ar')}
-          </div>
-          <div style="text-align: center; margin-top: 20px;" class="no-print">
-            <button onclick="window.print()" style="padding: 10px 30px; background: #1a237e; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">
-              🖨️ طباعة الكشف
-            </button>
-          </div>
-        </div>
-      </body>
-    </html>
-  `);
-  printWindow.document.close();
-};
-
 export default function GradesViewer() {
   const [grades, setGrades] = useState([]);
   const [students, setStudents] = useState([]);
@@ -174,6 +42,7 @@ export default function GradesViewer() {
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [gradingConfig, setGradingConfig] = useState(null);
   
   // ====== خيارات الفلترة ======
   const [selectedClass, setSelectedClass] = useState('');
@@ -186,6 +55,47 @@ export default function GradesViewer() {
   // ====== قائمة السنوات الدراسية ======
   const [availableYears, setAvailableYears] = useState([]);
   const [schoolSettings, setSchoolSettings] = useState(null);
+
+  // ============ فلترة المواد حسب الصف ============
+  const filteredSubjects = useMemo(() => {
+    if (!selectedClass) return subjects;
+    return subjects.filter(subject => subject.classId === selectedClass);
+  }, [subjects, selectedClass]);
+
+  // ============ الحصول على الحقول الديناميكية للعرض ============
+  const dynamicGradeFields = useMemo(() => {
+    if (!selectedSubject || !gradingConfig) {
+      return GRADE_FIELDS;
+    }
+    const classId = selectedClass || null;
+    const fields = getGradeFieldsForSubject(selectedSubject, classId, gradingConfig);
+    console.log('📊 GradesViewer - الحقول الديناميكية:', fields);
+    return fields;
+  }, [selectedSubject, selectedClass, gradingConfig]);
+
+  // ============ الحصول على المجموع الكلي للعرض ============
+  const currentMaxTotal = useMemo(() => {
+    if (!selectedSubject) return 100;
+    const classId = selectedClass || null;
+    return getTotalMaxForSubject(selectedSubject, classId, gradingConfig);
+  }, [selectedSubject, selectedClass, gradingConfig]);
+
+  // ============ جلب توزيع العلامات ============
+  useEffect(() => {
+    const unsubscribeSettings = onSnapshot(
+      doc(db, 'schoolSettings', 'settings'),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.gradingConfig) {
+            console.log('✅ GradesViewer - تم تحديث توزيع العلامات:', data.gradingConfig);
+            setGradingConfig(data.gradingConfig);
+          }
+        }
+      }
+    );
+    return () => unsubscribeSettings();
+  }, []);
 
   // ============ جلب إعدادات المدرسة والسنوات المتاحة ============
   useEffect(() => {
@@ -277,13 +187,11 @@ export default function GradesViewer() {
     };
   }, []);
 
-  // ============ ✅ إصلاح زر التحديث ============
+  // ============ زر التحديث ============
   const handleRefresh = () => {
     setRefreshing(true);
     setMessage({ type: 'info', text: '🔄 جاري تحديث البيانات...' });
     
-    // البيانات يتم تحديثها تلقائياً عبر onSnapshot
-    // فقط نعرض رسالة نجاح
     setTimeout(() => {
       setMessage({ type: 'success', text: '✅ تم تحديث البيانات بنجاح!' });
       setRefreshing(false);
@@ -291,15 +199,23 @@ export default function GradesViewer() {
     }, 500);
   };
 
-  // ============ الحصول على العلامات ============
-  const getStudentGrade = (studentId) => {
-    const grade = grades.find(g => 
+  // ============ الحصول على علامات الطالب ============
+  const getStudentGrades = (studentId) => {
+    return grades.filter(g => 
       g.studentId === studentId && 
-      g.subjectId === selectedSubject && 
       g.semester === selectedSemester &&
       g.academicYear === academicYear
     );
-    return grade || null;
+  };
+
+  // ============ الحصول على علامة طالب في مادة محددة ============
+  const getStudentGradeForSubject = (studentId, subjectId) => {
+    return grades.find(g => 
+      g.studentId === studentId && 
+      g.subjectId === subjectId && 
+      g.semester === selectedSemester &&
+      g.academicYear === academicYear
+    );
   };
 
   const getClassName = (classId) => {
@@ -313,45 +229,283 @@ export default function GradesViewer() {
   };
 
   // ============ فلترة الطلاب ============
-  const filteredStudents = students.filter(student => {
-    if (selectedClass && student.classId !== selectedClass) return false;
-    if (searchQuery && !student.fullName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-    return true;
-  });
+  const filteredStudents = useMemo(() => {
+    return students.filter(student => {
+      if (selectedClass && student.classId !== selectedClass) return false;
+      if (searchQuery && !student.fullName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+  }, [students, selectedClass, searchQuery]);
 
-  const sortedStudents = [...filteredStudents].sort((a, b) => 
-    a.fullName.localeCompare(b.fullName)
-  );
+  // ✅ ترتيب الطلاب أبجدياً
+  const sortedStudents = useMemo(() => {
+    return [...filteredStudents].sort((a, b) => {
+      const nameA = a.fullName || '';
+      const nameB = b.fullName || '';
+      return nameA.localeCompare(nameB, 'ar', { sensitivity: 'base' });
+    });
+  }, [filteredStudents]);
 
+  // ✅ ترتيب الصفوف أبجدياً
+  const sortedClasses = useMemo(() => {
+    return [...classes].sort((a, b) => {
+      const nameA = a.name || '';
+      const nameB = b.name || '';
+      return nameA.localeCompare(nameB, 'ar', { sensitivity: 'base' });
+    });
+  }, [classes]);
+
+  // ✅ ترتيب المواد أبجدياً
+  const sortedSubjects = useMemo(() => {
+    return [...filteredSubjects].sort((a, b) => {
+      const nameA = a.name || '';
+      const nameB = b.name || '';
+      return nameA.localeCompare(nameB, 'ar', { sensitivity: 'base' });
+    });
+  }, [filteredSubjects]);
+
+  // ============ دالة طباعة الكشف لمادة واحدة ============
+  const printGradeSheet = (classData, studentsData, gradesData, subjectData, semesterData, academicYearData) => {
+    const printWindow = window.open('', '_blank', 'width=1000,height=800');
+    if (!printWindow) return;
+    
+    const fieldsToRender = dynamicGradeFields || GRADE_FIELDS;
+    const maxTotal = currentMaxTotal || 100;
+    
+    const rows = studentsData.map(student => {
+      const grade = gradesData.find(g => 
+        g.studentId === student.id && 
+        g.subjectId === subjectData?.id && 
+        g.semester === semesterData &&
+        g.academicYear === academicYearData
+      );
+      
+      const fields = {};
+      fieldsToRender.forEach(f => {
+        fields[f.key] = grade?.[f.key] || 0;
+      });
+      
+      let total = 0;
+      fieldsToRender.forEach(f => {
+        total += (fields[f.key] || 0);
+      });
+      
+      const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
+      const gradeInfo = getGrade(percentage);
+      
+      return `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${student.fullName}</td>
+          ${fieldsToRender.map(f => 
+            `<td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields[f.key] || 0}</td>`
+          ).join('')}
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #2e7d32;">${total} / ${maxTotal}</td>
+          <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
+            <span style="padding: 2px 8px; border-radius: 12px; background: ${percentage >= 90 ? '#e8f5e9' : percentage >= 80 ? '#e3f2fd' : percentage >= 70 ? '#fff3e0' : percentage >= 60 ? '#fff8e1' : '#ffebee'}; color: ${percentage >= 90 ? '#2e7d32' : percentage >= 80 ? '#1565c0' : percentage >= 70 ? '#e65100' : percentage >= 60 ? '#f57f17' : '#c62828'};">
+              ${gradeInfo.label}
+            </span>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    const semesterLabel = semesterData === 1 ? 'الفصل الدراسي الأول' : 'الفصل الدراسي الثاني';
+    const className = classData?.name || 'غير محدد';
+    const subjectName = subjectData?.name || 'جميع المواد';
+    const schoolName = 'مدرستك الثانوية';
+
+    const headerFields = fieldsToRender.map(f => 
+      `<th style="padding: 8px; border: 1px solid #1a237e; text-align: center;">${f.label}<br><span style="font-size:10px;font-weight:normal;">(${f.max || 0})</span></th>`
+    ).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html dir="rtl">
+        <head>
+          <title>كشف العلامات - ${className}</title>
+          <meta charset="UTF-8">
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #fff; margin: 0; }
+            .container { max-width: 1100px; margin: 0 auto; direction: rtl; }
+            .header { text-align: center; border-bottom: 3px solid #1a237e; padding-bottom: 15px; margin-bottom: 20px; }
+            .school-name { font-size: 24px; font-weight: bold; color: #1a237e; }
+            .title { font-size: 20px; font-weight: bold; margin: 10px 0; color: #1a237e; }
+            .info { text-align: center; color: #555; font-size: 14px; margin-bottom: 15px; }
+            .info span { margin: 0 10px; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+            th { background: #1a237e; color: white; padding: 10px 8px; border: 1px solid #1a237e; text-align: center; font-weight: bold; }
+            td { padding: 8px; border: 1px solid #ddd; text-align: center; }
+            tr:nth-child(even) { background: #f8f9fa; }
+            .footer { text-align: center; margin-top: 20px; padding-top: 15px; border-top: 2px solid #1a237e; font-size: 12px; color: #888; }
+            .sub-title { font-size: 14px; font-weight: bold; color: #1a237e; margin: 5px 0; }
+            @media print { body { padding: 10px; } .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="school-name">${schoolName}</div>
+              <div class="title">كشف العلامات</div>
+              <div class="sub-title">الصف: ${className}</div>
+              <div class="info">
+                <span>📚 المادة: ${subjectName}</span>
+                <span>📅 الفصل: ${semesterLabel}</span>
+                <span>📆 العام الدراسي: ${academicYearData}</span>
+                <span>👨‍🎓 عدد الطلاب: ${studentsData.length}</span>
+                <span>📊 المجموع الكلي: ${maxTotal} علامة</span>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>اسم الطالب</th>
+                  ${headerFields}
+                  <th>المجموع<br><span style="font-size:10px;font-weight:normal;">(${maxTotal})</span></th>
+                  <th>التقدير</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <div class="footer">
+              تم إنشاء هذا التقرير بواسطة المنصة التعليمية الذكية<br>
+              تاريخ الطباعة: ${new Date().toLocaleDateString('ar')}
+            </div>
+            <div style="text-align: center; margin-top: 20px;" class="no-print">
+              <button onclick="window.print()" style="padding: 10px 30px; background: #1a237e; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">
+                🖨️ طباعة الكشف
+              </button>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  // ============ طباعة جميع المواد ============
+  const printAllSubjectsSheet = (classData, studentsList, subjectsList) => {
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
+    if (!printWindow) return;
+
+    const semesterLabel = selectedSemester === 1 ? 'الفصل الدراسي الأول' : 'الفصل الدراسي الثاني';
+    const className = classData?.name || 'غير محدد';
+    const schoolName = 'مدرستك الثانوية';
+
+    // 1. بناء ترويسة المواد فقط
+    let headerRow = `<th>اسم الطالب</th>`;
+    subjectsList.forEach(sub => {
+      headerRow += `<th style="padding: 8px; border: 1px solid #1a237e; text-align: center;">${sub.name}</th>`;
+    });
+    // 2. إضافة عمود المجموع الكلي مرة واحدة فقط في النهاية
+    headerRow += `<th style="padding: 8px; border: 1px solid #1a237e; text-align: center; font-weight: bold; color: #2e7d32;">المجموع الكلي</th>`;
+
+    const rows = studentsList.map(student => {
+      let row = `<td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${student.fullName}</td>`;
+      let total = 0;
+      
+      subjectsList.forEach(sub => {
+        const grade = getStudentGradeForSubject(student.id, sub.id);
+        const subjectTotal = grade ? calculateTotal(grade) : 0;
+        total += subjectTotal;
+        row += `<td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${subjectTotal}</td>`;
+      });
+      
+      // 3. إضافة المجموع الكلي للطالب في نهاية الصف
+      row += `<td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #2e7d32;">${total}</td>`;
+      return `<tr>${row}</tr>`;
+    }).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html dir="rtl">
+        <head>
+          <title>كشف العلامات - جميع المواد - ${className}</title>
+          <meta charset="UTF-8">
+          <style>
+            body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background: #fff; margin: 0; }
+            .container { max-width: 1200px; margin: 0 auto; direction: rtl; }
+            .header { text-align: center; border-bottom: 3px solid #1a237e; padding-bottom: 15px; margin-bottom: 20px; }
+            .school-name { font-size: 24px; font-weight: bold; color: #1a237e; }
+            .title { font-size: 20px; font-weight: bold; margin: 10px 0; color: #1a237e; }
+            .info { text-align: center; color: #555; font-size: 14px; margin-bottom: 15px; }
+            .info span { margin: 0 10px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+            th { background: #1a237e; color: white; padding: 8px; border: 1px solid #1a237e; text-align: center; font-weight: bold; }
+            td { padding: 6px 8px; border: 1px solid #ddd; text-align: center; }
+            tr:nth-child(even) { background: #f8f9fa; }
+            .footer { text-align: center; margin-top: 20px; padding-top: 15px; border-top: 2px solid #1a237e; font-size: 12px; color: #888; }
+            .sub-title { font-size: 14px; font-weight: bold; color: #1a237e; margin: 5px 0; }
+            @media print { body { padding: 10px; } .no-print { display: none; } }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="school-name">${schoolName}</div>
+              <div class="title">كشف العلامات - جميع المواد</div>
+              <div class="sub-title">الصف: ${className}</div>
+              <div class="info">
+                <span>📅 الفصل: ${semesterLabel}</span>
+                <span>📆 العام الدراسي: ${academicYear}</span>
+                <span>👨‍🎓 عدد الطلاب: ${studentsList.length}</span>
+                <span>📚 عدد المواد: ${subjectsList.length}</span>
+              </div>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  ${headerRow}
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+            <div style="margin-top: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; display: flex; justify-content: space-around; flex-wrap: wrap;">
+              <div><strong>عدد الطلاب:</strong> ${studentsList.length}</div>
+              <div><strong>عدد المواد:</strong> ${subjectsList.length}</div>
+            </div>
+            <div class="footer">
+              تم إنشاء هذا التقرير بواسطة المنصة التعليمية الذكية<br>
+              تاريخ الطباعة: ${new Date().toLocaleDateString('ar')}
+            </div>
+            <div style="text-align: center; margin-top: 20px;" class="no-print">
+              <button onclick="window.print()" style="padding: 10px 30px; background: #1a237e; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer;">
+                🖨️ طباعة الكشف
+              </button>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
   // ============ طباعة الكشف ============
   const handlePrint = () => {
-    if (!selectedSubject) {
-      alert('❌ الرجاء اختيار المادة أولاً');
-      return;
-    }
-    
     if (!selectedClass) {
-      alert('❌ الرجاء اختيار الصف أولاً');
+      setMessage({ type: 'error', text: '❌ الرجاء اختيار الصف أولاً' });
       return;
     }
     
     const classData = classes.find(c => c.id === selectedClass);
-    const subjectData = subjects.find(s => s.id === selectedSubject);
     const studentsList = students.filter(s => s.classId === selectedClass);
     
     if (studentsList.length === 0) {
-      alert('❌ لا يوجد طلاب في هذا الصف');
+      setMessage({ type: 'error', text: '❌ لا يوجد طلاب في هذا الصف' });
       return;
     }
-    
-    printGradeSheet(
-      classData,
-      studentsList,
-      grades,
-      subjectData,
-      selectedSemester,
-      academicYear
-    );
+
+    if (selectedSubject) {
+      const subjectData = subjects.find(s => s.id === selectedSubject);
+      printGradeSheet(
+        classData,
+        studentsList,
+        grades,
+        subjectData,
+        selectedSemester,
+        academicYear
+      );
+    } else {
+      printAllSubjectsSheet(classData, studentsList, filteredSubjects);
+    }
   };
 
   if (loading) {
@@ -366,8 +520,284 @@ export default function GradesViewer() {
   const isSemester1Closed = schoolSettings?.semesters?.semester1?.status === 'closed';
   const isSemester2Closed = schoolSettings?.semesters?.semester2?.status === 'closed';
 
+  // ============ عرض جميع المواد ============
+  const renderAllSubjects = () => {
+    if (filteredSubjects.length === 0) {
+      return (
+        <div className="text-center py-12">
+          <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">⚠️ لا توجد مواد مسجلة لهذا الصف</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-right text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-900 border-b border-slate-700">
+              <th className="p-3 text-center font-bold text-slate-300 sticky right-0 bg-slate-900 min-w-[120px]">
+                اسم الطالب
+              </th>
+              {filteredSubjects.map(sub => (
+                <th key={sub.id} className="p-3 text-center font-bold text-blue-400 min-w-[80px]">
+                  <div>{sub.name}</div>
+                  <div className="text-[9px] text-slate-500">(100)</div>
+                </th>
+              ))}
+              <th className="p-3 text-center font-bold text-emerald-400 min-w-[80px]">
+                <div>المجموع الكلي</div>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedStudents.length === 0 ? (
+              <tr>
+                <td colSpan={filteredSubjects.length + 2} className="text-center py-8 text-slate-400">
+                  لا يوجد طلاب في هذا الصف
+                </td>
+              </tr>
+            ) : (
+              sortedStudents.map((student) => {
+                let totalAllSubjects = 0;
+                
+                return (
+                  <tr key={student.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition-all">
+                    <td className="p-3 font-bold text-white sticky right-0 bg-slate-800/50 min-w-[120px]">
+                      {student.fullName}
+                    </td>
+                    {filteredSubjects.map(sub => {
+                      const grade = getStudentGradeForSubject(student.id, sub.id);
+                      const subjectTotal = grade ? calculateTotal(grade) : 0;
+                      totalAllSubjects += subjectTotal;
+                      
+                      return (
+                        <td key={sub.id} className="p-2 text-center text-white">
+                          {subjectTotal}
+                        </td>
+                      );
+                    })}
+                    <td className="p-3 text-center font-bold text-emerald-400">
+                      {totalAllSubjects}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        {sortedStudents.length > 0 && (
+          <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-slate-800">
+            <h4 className="text-xs font-bold text-slate-400 mb-3">📊 ملخص المواد</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-xs text-slate-400">عدد الطلاب</p>
+                <p className="text-lg font-bold text-white">{sortedStudents.length}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-slate-400">عدد المواد</p>
+                <p className="text-lg font-bold text-blue-400">{filteredSubjects.length}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-slate-400">المعدل العام</p>
+                <p className="text-lg font-bold text-emerald-400">
+                  {sortedStudents.length > 0 
+                    ? (sortedStudents.reduce((sum, s) => {
+                        const grades = getStudentGrades(s.id);
+                        const total = grades.reduce((acc, g) => acc + calculateTotal(g), 0);
+                        return sum + total;
+                      }, 0) / sortedStudents.length / filteredSubjects.length).toFixed(1)
+                    : 0
+                  }
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-slate-400">الحالة</p>
+                <p className="text-lg font-bold text-green-400">
+                  {selectedSemester === 1 
+                    ? (isSemester1Closed ? '🔒 مغلق' : '✅ مفتوح')
+                    : (isSemester2Closed ? '🔒 مغلق' : '✅ مفتوح')
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============ عرض مادة محددة مع الحقول الديناميكية ============
+  const renderSubjectContent = () => {
+    const subject = subjects.find(s => s.id === selectedSubject);
+    if (!subject) {
+      return (
+        <div className="text-center py-12">
+          <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">المادة غير موجودة</p>
+        </div>
+      );
+    }
+
+    const fieldsToRender = dynamicGradeFields || GRADE_FIELDS;
+    const maxTotal = currentMaxTotal || 100;
+
+    return (
+      <div className="overflow-x-auto">
+        <table className="w-full text-right text-sm border-collapse">
+          <thead>
+            <tr className="bg-slate-900 border-b border-slate-700">
+              <th className="p-3 text-center font-bold text-slate-300 sticky right-0 bg-slate-900 min-w-[120px]">
+                اسم الطالب
+              </th>
+              {fieldsToRender.map(field => (
+                <th key={field.key} className={`p-3 text-center font-bold text-${field.color || 'blue-400'} min-w-[80px]`}>
+                  <div>{field.label}</div>
+                  <div className="text-[9px] text-slate-500">({field.max || 0})</div>
+                </th>
+              ))}
+              <th className="p-3 text-center font-bold text-emerald-400 min-w-[80px]">
+                <div>المجموع</div>
+                <div className="text-[9px] text-slate-500">(من {maxTotal})</div>
+              </th>
+              <th className="p-3 text-center font-bold text-slate-400 min-w-[80px]">
+                التقدير
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortedStudents.length === 0 ? (
+              <tr>
+                <td colSpan={fieldsToRender.length + 3} className="text-center py-8 text-slate-400">
+                  لا يوجد طلاب في هذا الصف
+                </td>
+              </tr>
+            ) : (
+              sortedStudents.map((student) => {
+                const grade = getStudentGradeForSubject(student.id, selectedSubject);
+                const fields = {};
+                fieldsToRender.forEach(f => {
+                  fields[f.key] = grade?.[f.key] || 0;
+                });
+                
+                let total = 0;
+                fieldsToRender.forEach(f => {
+                  total += (fields[f.key] || 0);
+                });
+                
+                const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
+                const gradeInfo = getGrade(percentage);
+
+                return (
+                  <tr key={student.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition-all">
+                    <td className="p-3 font-bold text-white sticky right-0 bg-slate-800/50 min-w-[120px]">
+                      {student.fullName}
+                    </td>
+                    {fieldsToRender.map(field => (
+                      <td key={field.key} className="p-2 text-center text-white">
+                        {fields[field.key] || 0}
+                      </td>
+                    ))}
+                    <td className="p-3 text-center font-bold text-emerald-400">
+                      {total}
+                    </td>
+                    <td className="p-3 text-center">
+                      <span className={`px-2 py-1 rounded-full text-xs font-bold ${gradeInfo.color}`}>
+                        {gradeInfo.label}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        {sortedStudents.length > 0 && (
+          <div className="mt-4 p-4 bg-slate-900 rounded-xl border border-slate-800">
+            <h4 className="text-xs font-bold text-slate-400 mb-3">📊 ملخص المادة</h4>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="text-center">
+                <p className="text-xs text-slate-400">عدد الطلاب</p>
+                <p className="text-lg font-bold text-white">{sortedStudents.length}</p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-slate-400">المعدل العام</p>
+                <p className="text-lg font-bold text-emerald-400">
+                  {sortedStudents.length > 0 
+                    ? (sortedStudents.reduce((sum, s) => {
+                        const grade = getStudentGradeForSubject(s.id, selectedSubject);
+                        let total = 0;
+                        fieldsToRender.forEach(f => {
+                          total += (grade?.[f.key] || 0);
+                        });
+                        return sum + total;
+                      }, 0) / sortedStudents.length).toFixed(1)
+                    : 0
+                  }
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-slate-400">أعلى علامة</p>
+                <p className="text-lg font-bold text-emerald-400">
+                  {sortedStudents.length > 0
+                    ? Math.max(...sortedStudents.map(s => {
+                        const grade = getStudentGradeForSubject(s.id, selectedSubject);
+                        let total = 0;
+                        fieldsToRender.forEach(f => {
+                          total += (grade?.[f.key] || 0);
+                        });
+                        return total;
+                      }))
+                    : 0
+                  }
+                </p>
+              </div>
+              <div className="text-center">
+                <p className="text-xs text-slate-400">أدنى علامة</p>
+                <p className="text-lg font-bold text-rose-400">
+                  {sortedStudents.length > 0
+                    ? Math.min(...sortedStudents.map(s => {
+                        const grade = getStudentGradeForSubject(s.id, selectedSubject);
+                        let total = 0;
+                        fieldsToRender.forEach(f => {
+                          total += (grade?.[f.key] || 0);
+                        });
+                        return total;
+                      }))
+                    : 0
+                  }
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============ عرض المحتوى الرئيسي ============
+  const renderContent = () => {
+    if (!selectedClass) {
+      return (
+        <div className="text-center py-12">
+          <School className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">الرجاء اختيار صف أولاً</p>
+        </div>
+      );
+    }
+
+    if (!selectedSubject) {
+      return renderAllSubjects();
+    }
+
+    return renderSubjectContent();
+  };
+
   return (
-    <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+    // ✅ تم تعديل السطر الأول ليدعم الوضع الفاتح والغامق
+    <div className="bg-white dark:bg-slate-800 rounded-2xl p-6 border border-gray-200 dark:border-slate-700 transition-colors duration-300">
       {/* ====== العنوان ====== */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
@@ -377,19 +807,24 @@ export default function GradesViewer() {
           </h2>
           <p className="text-xs text-slate-400">
             عرض علامات الطلاب - للاطلاع فقط (بدون تعديل)
+            {!selectedSubject && selectedClass && (
+              <span className="text-blue-400 mr-2">📚 عرض جميع المواد</span>
+            )}
+            {selectedSubject && selectedClass && (
+              <span className="text-emerald-400 mr-2">📊 المجموع الكلي: {currentMaxTotal} علامة</span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handlePrint}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-all"
-            disabled={!selectedClass || !selectedSubject}
+            disabled={!selectedClass}
           >
             <Printer className="w-3.5 h-3.5" />
             طباعة
           </button>
           
-          {/* ====== ✅ زر التحديث المُصلح ====== */}
           <button
             onClick={handleRefresh}
             disabled={refreshing}
@@ -421,28 +856,43 @@ export default function GradesViewer() {
           <label className="block text-xs text-slate-400 mb-1">الصف</label>
           <select
             value={selectedClass}
-            onChange={(e) => setSelectedClass(e.target.value)}
+            onChange={(e) => {
+              setSelectedClass(e.target.value);
+              setSelectedSubject('');
+            }}
             className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
           >
             <option value="">جميع الصفوف</option>
-            {classes.map(cls => (
+            {sortedClasses.map(cls => (
               <option key={cls.id} value={cls.id}>{cls.name}</option>
             ))}
           </select>
         </div>
 
         <div className="flex-1 min-w-[150px]">
-          <label className="block text-xs text-slate-400 mb-1">المادة *</label>
+          <label className="block text-xs text-slate-400 mb-1">المادة</label>
           <select
             value={selectedSubject}
             onChange={(e) => setSelectedSubject(e.target.value)}
             className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
           >
             <option value="">جميع المواد</option>
-            {subjects.map(sub => (
-              <option key={sub.id} value={sub.id}>{sub.name}</option>
-            ))}
+            {sortedSubjects.map(sub => {
+              const hasCustomConfig = gradingConfig?.subjects?.[sub.id] || 
+                                     (selectedClass && gradingConfig?.subjects?.[`${sub.id}_${selectedClass}`]);
+              return (
+                <option key={sub.id} value={sub.id}>
+                  {sub.name} {hasCustomConfig ? '🔧' : ''}
+                </option>
+              );
+            })}
           </select>
+          {selectedClass && filteredSubjects.length === 0 && (
+            <p className="text-[10px] text-amber-400 mt-1">⚠️ لا توجد مواد لهذا الصف</p>
+          )}
+          {selectedClass && filteredSubjects.length > 0 && !selectedSubject && (
+            <p className="text-[10px] text-blue-400 mt-1">📚 عرض {filteredSubjects.length} مادة</p>
+          )}
         </div>
 
         <div className="min-w-[120px]">
@@ -457,7 +907,6 @@ export default function GradesViewer() {
           </select>
         </div>
 
-        {/* ====== حقل العام الدراسي - مفتوح للتغيير ====== */}
         <div className="min-w-[150px]">
           <label className="block text-xs text-slate-400 mb-1">العام الدراسي</label>
           <div className="relative">
@@ -500,135 +949,17 @@ export default function GradesViewer() {
           </span>
           <span className="text-slate-500">| عرض فقط - لا يمكن التعديل</span>
           <span className="text-slate-500">| العام: <span className="text-white font-bold">{academicYear}</span></span>
+          {!selectedSubject && selectedClass && (
+            <span className="text-blue-400">| 📚 عرض جميع المواد</span>
+          )}
+          {selectedSubject && selectedClass && (
+            <span className="text-emerald-400">| 📊 المجموع الكلي: {currentMaxTotal} علامة</span>
+          )}
         </div>
       </div>
 
-      {/* ====== جدول العلامات ====== */}
-      {selectedSubject ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-sm border-collapse">
-            <thead>
-              <tr className="bg-slate-900 border-b border-slate-700">
-                <th className="p-3 text-center font-bold text-slate-300 sticky right-0 bg-slate-900 min-w-[120px]">
-                  اسم الطالب
-                </th>
-                {GRADE_FIELDS.map(field => (
-                  <th key={field.key} className={`p-3 text-center font-bold text-${field.color} min-w-[80px]`}>
-                    <div>{field.label}</div>
-                    <div className="text-[9px] text-slate-500">({field.max})</div>
-                  </th>
-                ))}
-                <th className="p-3 text-center font-bold text-emerald-400 min-w-[80px]">
-                  <div>المجموع</div>
-                  <div className="text-[9px] text-slate-500">(100)</div>
-                </th>
-                <th className="p-3 text-center font-bold text-slate-400 min-w-[80px]">
-                  التقدير
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedStudents.length === 0 ? (
-                <tr>
-                  <td colSpan="9" className="text-center py-8 text-slate-400">
-                    لا يوجد طلاب في هذا الصف
-                  </td>
-                </tr>
-              ) : (
-                sortedStudents.map((student) => {
-                  const grade = getStudentGrade(student.id);
-                  const fields = {
-                    dailyExam1: grade?.dailyExam1 || 0,
-                    participation1: grade?.participation1 || 0,
-                    midtermExam: grade?.midtermExam || 0,
-                    dailyExam2: grade?.dailyExam2 || 0,
-                    participation2: grade?.participation2 || 0,
-                    finalExam: grade?.finalExam || 0
-                  };
-                  const total = calculateTotal(fields);
-                  const percentage = (total / 100) * 100;
-                  const gradeInfo = getGrade(percentage);
-
-                  return (
-                    <tr key={student.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition-all">
-                      <td className="p-3 font-bold text-white sticky right-0 bg-slate-800/50 min-w-[120px]">
-                        {student.fullName}
-                      </td>
-                      {GRADE_FIELDS.map(field => (
-                        <td key={field.key} className="p-2 text-center text-white">
-                          {fields[field.key]}
-                        </td>
-                      ))}
-                      <td className="p-3 text-center font-bold text-emerald-400">
-                        {total}
-                      </td>
-                      <td className="p-3 text-center">
-                        <span className={`px-2 py-1 rounded-full text-xs font-bold ${gradeInfo.color}`}>
-                          {gradeInfo.label}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <div className="text-center py-12">
-          <BookOpen className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-400 text-sm">الرجاء اختيار مادة لعرض العلامات</p>
-        </div>
-      )}
-
-      {/* ====== ملخص العلامات ====== */}
-      {selectedSubject && sortedStudents.length > 0 && (
-        <div className="mt-6 p-4 bg-slate-900 rounded-xl border border-slate-800">
-          <h4 className="text-xs font-bold text-slate-400 mb-3">📊 ملخص العلامات</h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center">
-              <p className="text-xs text-slate-400">عدد الطلاب</p>
-              <p className="text-lg font-bold text-white">{sortedStudents.length}</p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-slate-400">المعدل العام</p>
-              <p className="text-lg font-bold text-emerald-400">
-                {sortedStudents.length > 0 
-                  ? (sortedStudents.reduce((sum, s) => {
-                      const grade = getStudentGrade(s.id);
-                      return sum + (grade ? calculateTotal(grade) : 0);
-                    }, 0) / sortedStudents.length).toFixed(1)
-                  : 0
-                }
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-slate-400">أعلى علامة</p>
-              <p className="text-lg font-bold text-emerald-400">
-                {sortedStudents.length > 0
-                  ? Math.max(...sortedStudents.map(s => {
-                      const grade = getStudentGrade(s.id);
-                      return grade ? calculateTotal(grade) : 0;
-                    }))
-                  : 0
-                }
-              </p>
-            </div>
-            <div className="text-center">
-              <p className="text-xs text-slate-400">أدنى علامة</p>
-              <p className="text-lg font-bold text-rose-400">
-                {sortedStudents.length > 0
-                  ? Math.min(...sortedStudents.map(s => {
-                      const grade = getStudentGrade(s.id);
-                      return grade ? calculateTotal(grade) : 0;
-                    }))
-                  : 0
-                }
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ====== المحتوى ====== */}
+      {renderContent()}
     </div>
   );
 }

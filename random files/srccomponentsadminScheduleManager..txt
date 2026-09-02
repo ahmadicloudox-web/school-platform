@@ -1,0 +1,2759 @@
+// src/components/admin/ScheduleManager.jsx
+import React, { useState, useEffect, useCallback } from 'react';
+import { db } from '../../services/firebase';
+import { 
+  collection, doc, getDocs, addDoc, updateDoc, 
+  deleteDoc, query, where, onSnapshot, writeBatch 
+} from 'firebase/firestore';
+import { 
+  Calendar, Plus, Trash2, Edit3, Save, X, Search, 
+  Loader2, Users, School, BookOpen, CheckCircle, AlertCircle,
+  ChevronDown, ChevronUp, Printer, RefreshCw, Clock,
+  User, Settings, Sparkles, ArrowLeft, ArrowRight,
+  FileText, Download, Filter, Copy, RotateCw, Ban,
+  Eye, EyeOff, Maximize2, Minimize2, Grid, List,
+  AlertTriangle, Info, Zap, Hash, Settings2, CalendarDays,
+  Shuffle, TrendingUp, Award, Bot, Brain, Lightbulb,
+  Target, Gauge, Layers, Equal
+} from 'lucide-react';
+
+// ============ قائمة أيام الأسبوع الكاملة ============
+const ALL_WEEK_DAYS = [
+  { id: 'saturday', label: 'السبت', short: 'س' },
+  { id: 'sunday', label: 'الأحد', short: 'أ' },
+  { id: 'monday', label: 'الاثنين', short: 'اث' },
+  { id: 'tuesday', label: 'الثلاثاء', short: 'ث' },
+  { id: 'wednesday', label: 'الأربعاء', short: 'أر' },
+  { id: 'thursday', label: 'الخميس', short: 'خ' },
+  { id: 'friday', label: 'الجمعة', short: 'ج' }
+];
+
+// ============ الإعدادات الافتراضية ============
+const DEFAULT_SCHOOL_DAYS = [
+  { id: 'sunday', label: 'الأحد', short: 'أ', active: true },
+  { id: 'monday', label: 'الاثنين', short: 'اث', active: true },
+  { id: 'tuesday', label: 'الثلاثاء', short: 'ث', active: true },
+  { id: 'wednesday', label: 'الأربعاء', short: 'أر', active: true },
+  { id: 'thursday', label: 'الخميس', short: 'خ', active: true }
+];
+
+// ============ ألوان المواد ============
+const SUBJECT_COLORS = [
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+  '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+  '#F8C471', '#82E0AA', '#F1948A', '#85929E', '#73C6B6'
+];
+
+// ============ عدد الحصص لكل يوم (افتراضي) ============
+const DEFAULT_DAY_PERIODS = {
+  sunday: 7,
+  monday: 7,
+  tuesday: 7,
+  wednesday: 6,
+  thursday: 6
+};
+
+// ============ التوقيت الافتراضي ============
+const DEFAULT_PERIOD_LABELS = {
+  "1": "الحصة 1",
+  "2": "الحصة 2",
+  "3": "الحصة 3",
+  "4": "الحصة 4",
+  "5": "الحصة 5",
+  "6": "الحصة 6",
+  "7": "الحصة 7",
+  "8": "الحصة 8",
+  "9": "الحصة 9",
+  "10": "الحصة 10"
+};
+
+// ============ المساعد الذكي ============
+const SmartAssistant = ({ 
+  classes, teachers, subjects, subjectHours, 
+  teacherMaxHours, teacherMaxDailyHours, teacherPreferences,
+  teacherPriority, schoolDays, dayPeriods,
+  onApplySuggestion, onClose,
+  generatedSchedule 
+}) => {
+  const [analysis, setAnalysis] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [selectedSuggestion, setSelectedSuggestion] = useState(null);
+  const [expandedSections, setExpandedSections] = useState({
+    overview: true,
+    teachers: true,
+    subjects: true,
+    schedule: true,
+    recommendations: true,
+    optimization: true
+  });
+
+  // تحليل البيانات
+  useEffect(() => {
+    const analyzeData = () => {
+      const result = {
+        overview: {},
+        teachers: [],
+        subjects: [],
+        schedule: {},
+        recommendations: [],
+        conflicts: [],
+        warnings: [],
+        tips: [],
+        optimization: {
+          potential: 0,
+          suggestions: []
+        }
+      };
+
+      const activeDays = schoolDays.filter(d => d.active);
+      const totalPeriodsPerDay = activeDays.reduce((sum, day) => sum + (dayPeriods[day.id] || 0), 0);
+      const totalPeriodsPerWeek = totalPeriodsPerDay * 7;
+
+      result.overview = {
+        totalClasses: classes.length,
+        totalTeachers: teachers.length,
+        totalSubjects: subjects.length,
+        activeDays: activeDays.length,
+        totalPeriodsPerWeek: totalPeriodsPerWeek,
+        totalSubjectsWithoutTeacher: subjects.filter(s => !s.teacherId).length,
+        totalSubjectsWithoutClass: subjects.filter(s => !s.classId).length
+      };
+
+      // تحليل المعلمين
+      const teacherAnalysis = teachers.map(teacher => {
+        const teacherSubjects = subjects.filter(s => s.teacherId === teacher.id);
+        const totalHoursNeeded = teacherSubjects.reduce((sum, s) => sum + (subjectHours[s.id] || 2), 0);
+        const maxHours = teacherMaxHours[teacher.id] || 20;
+        const maxDaily = teacherMaxDailyHours[teacher.id];
+        const preferredDays = teacherPreferences[teacher.id]?.preferredDays || [];
+        const priority = teacherPriority[teacher.id] || 2;
+
+        const isOverloaded = totalHoursNeeded > maxHours;
+        const isUnderloaded = totalHoursNeeded < maxHours * 0.5 && teacherSubjects.length > 0;
+        const hasPreferredDays = preferredDays.length > 0;
+        const needsMoreDays = preferredDays.length < 3 && totalHoursNeeded > 10;
+        const utilization = maxHours > 0 ? (totalHoursNeeded / maxHours * 100) : 0;
+
+        return {
+          id: teacher.id,
+          name: teacher.fullName,
+          subjects: teacherSubjects.map(s => s.name),
+          totalHoursNeeded,
+          maxHours,
+          maxDaily,
+          preferredDays,
+          priority,
+          isOverloaded,
+          isUnderloaded,
+          hasPreferredDays,
+          needsMoreDays,
+          subjectsCount: teacherSubjects.length,
+          utilization,
+          gap: maxHours - totalHoursNeeded,
+          canTakeMore: utilization < 85 && totalHoursNeeded > 0
+        };
+      });
+
+      result.teachers = teacherAnalysis;
+
+      // تحليل المواد
+      const subjectAnalysis = subjects.map(subject => {
+        const hours = subjectHours[subject.id] || 2;
+        const teacher = teachers.find(t => t.id === subject.teacherId);
+        const className = classes.find(c => c.id === subject.classId)?.name || 'غير محدد';
+
+        return {
+          id: subject.id,
+          name: subject.name,
+          className,
+          hours,
+          teacherName: teacher?.fullName || 'غير معين',
+          hasTeacher: !!subject.teacherId,
+          hasClass: !!subject.classId,
+          teacherId: subject.teacherId,
+          classId: subject.classId
+        };
+      });
+
+      result.subjects = subjectAnalysis;
+
+      // اكتشاف المشاكل والتوصيات
+      const recommendations = [];
+      const conflicts = [];
+      const warnings = [];
+      const tips = [];
+      const optimizationSuggestions = [];
+
+      // 1. معلمين بدون مواد
+      const teachersWithoutSubjects = teacherAnalysis.filter(t => t.subjectsCount === 0);
+      if (teachersWithoutSubjects.length > 0) {
+        warnings.push({
+          type: 'no_subjects',
+          message: `${teachersWithoutSubjects.length} معلمين ليس لديهم مواد`,
+          details: teachersWithoutSubjects.map(t => t.name).join('، ')
+        });
+        recommendations.push({
+          type: 'assign_subjects',
+          title: 'توزيع مواد على المعلمين',
+          description: `المعلمين التاليين ليس لديهم مواد: ${teachersWithoutSubjects.map(t => t.name).join('، ')}`,
+          action: 'توزيع مواد جديدة عليهم',
+          priority: 'high'
+        });
+      }
+
+      // 2. مواد بدون معلمين
+      const subjectsWithoutTeacher = subjectAnalysis.filter(s => !s.hasTeacher);
+      if (subjectsWithoutTeacher.length > 0) {
+        conflicts.push({
+          type: 'no_teacher',
+          message: `${subjectsWithoutTeacher.length} مواد بدون معلم`,
+          details: subjectsWithoutTeacher.map(s => `${s.name} (${s.className})`).join('، ')
+        });
+        recommendations.push({
+          type: 'assign_teachers',
+          title: 'تعيين معلمين للمواد',
+          description: `المواد التالية بدون معلم: ${subjectsWithoutTeacher.map(s => s.name).join('، ')}`,
+          action: 'تعيين معلم لكل مادة',
+          priority: 'critical'
+        });
+      }
+
+      // 3. مواد بدون صف
+      const subjectsWithoutClass = subjectAnalysis.filter(s => !s.hasClass);
+      if (subjectsWithoutClass.length > 0) {
+        conflicts.push({
+          type: 'no_class',
+          message: `${subjectsWithoutClass.length} مواد بدون صف`,
+          details: subjectsWithoutClass.map(s => s.name).join('، ')
+        });
+        recommendations.push({
+          type: 'assign_classes',
+          title: 'تعيين صفوف للمواد',
+          description: `المواد التالية بدون صف: ${subjectsWithoutClass.map(s => s.name).join('، ')}`,
+          action: 'تعيين صف لكل مادة',
+          priority: 'critical'
+        });
+      }
+
+      // 4. معلمين مثقلين
+      const overloadedTeachers = teacherAnalysis.filter(t => t.isOverloaded);
+      if (overloadedTeachers.length > 0) {
+        conflicts.push({
+          type: 'overloaded_teachers',
+          message: `${overloadedTeachers.length} معلمين مثقلين`,
+          details: overloadedTeachers.map(t => `${t.name} (${t.totalHoursNeeded}/${t.maxHours})`).join('، ')
+        });
+        recommendations.push({
+          type: 'reduce_hours',
+          title: 'تخفيف عبء المعلمين',
+          description: `المعلمين التاليين لديهم حصص أكثر من الحد الأقصى: ${overloadedTeachers.map(t => t.name).join('، ')}`,
+          action: 'زيادة الحد الأقصى أو تقليل الحصص',
+          priority: 'high'
+        });
+      }
+
+      // 5. معلمين غير مستغلين بشكل كافٍ
+      const underloadedTeachers = teacherAnalysis.filter(t => t.canTakeMore && t.subjectsCount > 0);
+      if (underloadedTeachers.length > 0) {
+        tips.push({
+          type: 'underloaded',
+          message: `${underloadedTeachers.length} معلمين لديهم ساعات متاحة`,
+          details: underloadedTeachers.map(t => `${t.name} (${t.totalHoursNeeded}/${t.maxHours})`).join('، ')
+        });
+        recommendations.push({
+          type: 'increase_hours',
+          title: 'زيادة حصص المعلمين',
+          description: `المعلمين التاليين لديهم ساعات متاحة: ${underloadedTeachers.map(t => t.name).join('، ')}`,
+          action: 'توزيع مواد إضافية عليهم',
+          priority: 'medium'
+        });
+        optimizationSuggestions.push({
+          type: 'utilize_teachers',
+          title: 'استغلال المعلمين بشكل أفضل',
+          description: `يمكن زيادة استخدام ${underloadedTeachers.length} معلم`,
+          action: 'توزيع المواد بالتساوي'
+        });
+      }
+
+      // 6. توزيع المواد بين الصفوف
+      const classSubjectCount = {};
+      subjects.forEach(s => {
+        const className = classes.find(c => c.id === s.classId)?.name || 'غير محدد';
+        if (!classSubjectCount[className]) classSubjectCount[className] = 0;
+        classSubjectCount[className]++;
+      });
+
+      const avgSubjects = Object.values(classSubjectCount).reduce((a, b) => a + b, 0) / Object.keys(classSubjectCount).length || 0;
+      
+      Object.keys(classSubjectCount).forEach(className => {
+        const count = classSubjectCount[className];
+        if (count > avgSubjects * 1.5) {
+          warnings.push({
+            type: 'uneven_distribution',
+            message: `الصف ${className} لديه ${count} مادة (متوسط ${avgSubjects.toFixed(1)})`,
+            details: `عدد المواد في هذا الصف أعلى من المتوسط`
+          });
+          recommendations.push({
+            type: 'balance_classes',
+            title: `توازن مواد الصف ${className}`,
+            description: `الصف ${className} لديه ${count} مادة، والمتوسط ${avgSubjects.toFixed(1)}`,
+            action: 'إعادة توزيع المواد بين الصفوف',
+            priority: 'medium'
+          });
+        }
+      });
+
+      // 7. تحليل السعات اليومية
+      if (generatedSchedule) {
+        activeDays.forEach(day => {
+          let totalSlots = 0;
+          let usedSlots = 0;
+          classes.forEach(cls => {
+            const daySchedule = generatedSchedule[cls.id]?.[day.id] || [];
+            const periods = dayPeriods[day.id] || 0;
+            totalSlots += periods;
+            usedSlots += daySchedule.length;
+          });
+          const utilization = totalSlots > 0 ? (usedSlots / totalSlots * 100) : 0;
+          
+          if (utilization < 50 && classes.length > 0) {
+            warnings.push({
+              type: 'low_utilization',
+              message: `يوم ${day.label} لديه استخدام منخفض (${utilization.toFixed(0)}%)`,
+              details: `تم استخدام ${usedSlots} من ${totalSlots} حصة`
+            });
+          }
+        });
+      }
+
+      // 8. توصيات التحسين
+      const totalTeacherCapacity = teacherAnalysis.reduce((sum, t) => sum + t.maxHours, 0);
+      const totalHoursNeeded = subjectAnalysis.reduce((sum, s) => sum + s.hours, 0);
+      const optimizationPotential = totalTeacherCapacity > 0 ? (totalHoursNeeded / totalTeacherCapacity * 100) : 0;
+
+      result.optimization = {
+        potential: Math.min(optimizationPotential, 100),
+        suggestions: optimizationSuggestions,
+        totalCapacity: totalTeacherCapacity,
+        totalNeeded: totalHoursNeeded
+      };
+
+      // ترتيب التوصيات حسب الأولوية
+      const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+      recommendations.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+      result.recommendations = recommendations;
+      result.conflicts = conflicts;
+      result.warnings = warnings;
+      result.tips = tips;
+
+      setAnalysis(result);
+      setLoading(false);
+    };
+
+    analyzeData();
+  }, [classes, teachers, subjects, subjectHours, teacherMaxHours, 
+      teacherMaxDailyHours, teacherPreferences, teacherPriority, 
+      schoolDays, dayPeriods, generatedSchedule]);
+
+  // تطبيق التوصية
+  const applyRecommendation = (recommendation) => {
+    setSelectedSuggestion(recommendation);
+    
+    if (onApplySuggestion) {
+      onApplySuggestion(recommendation);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div className="bg-slate-800 rounded-2xl p-8 border border-slate-700">
+          <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto" />
+          <p className="text-slate-400 text-sm mt-3">جاري تحليل البيانات...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 z-[300] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+      <div className="bg-slate-800 rounded-2xl p-6 max-w-4xl w-full mx-4 border border-slate-700 shadow-2xl max-h-[90vh] overflow-y-auto">
+        {/* الرأس */}
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-gradient-to-br from-blue-500 to-purple-500 rounded-xl">
+              <Bot className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                المساعد الذكي المحسن
+                <span className="text-[8px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full">AI Pro</span>
+              </h3>
+              <p className="text-xs text-slate-400">تحليل ذكي متقدم وتوصيات دقيقة للوصول إلى 100%</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* ملخص سريع */}
+        {analysis && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+              <div className="text-[8px] text-slate-400">الصفوف</div>
+              <div className="text-lg font-bold text-white">{analysis.overview.totalClasses}</div>
+            </div>
+            <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+              <div className="text-[8px] text-slate-400">المعلمين</div>
+              <div className="text-lg font-bold text-white">{analysis.overview.totalTeachers}</div>
+            </div>
+            <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+              <div className="text-[8px] text-slate-400">المواد</div>
+              <div className="text-lg font-bold text-white">{analysis.overview.totalSubjects}</div>
+            </div>
+            <div className="bg-slate-900 p-3 rounded-lg border border-slate-700">
+              <div className="text-[8px] text-slate-400">أيام الدوام</div>
+              <div className="text-lg font-bold text-white">{analysis.overview.activeDays}</div>
+            </div>
+          </div>
+        )}
+
+        {/* مؤشر التحسين */}
+        {analysis && (
+          <div className="mb-4 p-3 bg-slate-900 rounded-lg border border-slate-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-400 flex items-center gap-2">
+                <Target className="w-3.5 h-3.5 text-emerald-400" />
+                إمكانية التحسين
+              </span>
+              <span className={`text-sm font-bold ${
+                analysis.optimization.potential >= 90 ? 'text-emerald-400' :
+                analysis.optimization.potential >= 70 ? 'text-blue-400' :
+                'text-amber-400'
+              }`}>
+                {analysis.optimization.potential.toFixed(0)}%
+              </span>
+            </div>
+            <div className="w-full h-2 bg-slate-700 rounded-full overflow-hidden">
+              <div 
+                className={`h-full rounded-full transition-all ${
+                  analysis.optimization.potential >= 90 ? 'bg-emerald-500' :
+                  analysis.optimization.potential >= 70 ? 'bg-blue-500' :
+                  'bg-amber-500'
+                }`}
+                style={{ width: `${analysis.optimization.potential}%` }}
+              />
+            </div>
+            <div className="flex justify-between mt-1 text-[8px] text-slate-500">
+              <span>السعة: {analysis.optimization.totalCapacity} حصة</span>
+              <span>المطلوب: {analysis.optimization.totalNeeded} حصة</span>
+            </div>
+          </div>
+        )}
+
+        {/* المشاكل الحرجة */}
+        {analysis && analysis.conflicts.length > 0 && (
+          <div className="mb-4 p-3 bg-rose-500/10 rounded-lg border border-rose-500/30">
+            <div className="flex items-center gap-2 text-rose-400 text-sm mb-2">
+              <AlertCircle className="w-4 h-4" />
+              <span className="font-bold">مشاكل حرجة ({analysis.conflicts.length})</span>
+            </div>
+            <div className="space-y-1">
+              {analysis.conflicts.map((conflict, index) => (
+                <div key={index} className="text-xs text-rose-300/80 flex items-start gap-2">
+                  <span className="text-rose-500">•</span>
+                  <span>
+                    <strong>{conflict.message}</strong>
+                    {conflict.details && <span className="text-rose-400/60">: {conflict.details}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* التحذيرات */}
+        {analysis && analysis.warnings.length > 0 && (
+          <div className="mb-4 p-3 bg-amber-500/10 rounded-lg border border-amber-500/30">
+            <div className="flex items-center gap-2 text-amber-400 text-sm mb-2">
+              <AlertTriangle className="w-4 h-4" />
+              <span className="font-bold">تحذيرات ({analysis.warnings.length})</span>
+            </div>
+            <div className="space-y-1">
+              {analysis.warnings.map((warning, index) => (
+                <div key={index} className="text-xs text-amber-300/80 flex items-start gap-2">
+                  <span className="text-amber-500">•</span>
+                  <span>
+                    <strong>{warning.message}</strong>
+                    {warning.details && <span className="text-amber-400/60">: {warning.details}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* التوصيات */}
+        {analysis && (
+          <div className="mb-4">
+            <div className="flex items-center gap-2 text-emerald-400 text-sm mb-2">
+              <Lightbulb className="w-4 h-4" />
+              <span className="font-bold">توصيات ذكية ({analysis.recommendations.length})</span>
+            </div>
+            <div className="space-y-2">
+              {analysis.recommendations.map((rec, index) => (
+                <div key={index} className="p-3 bg-slate-900 rounded-lg border border-slate-700 hover:border-emerald-500/30 transition-all">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-[8px] px-1.5 py-0.5 rounded font-bold ${
+                          rec.priority === 'critical' ? 'bg-rose-500/20 text-rose-400' :
+                          rec.priority === 'high' ? 'bg-orange-500/20 text-orange-400' :
+                          rec.priority === 'medium' ? 'bg-blue-500/20 text-blue-400' :
+                          'bg-slate-500/20 text-slate-400'
+                        }`}>
+                          {rec.priority === 'critical' ? '⚠️ حرج' :
+                           rec.priority === 'high' ? '🔴 عالي' :
+                           rec.priority === 'medium' ? '🟡 متوسط' :
+                           '🟢 منخفض'}
+                        </span>
+                        <h5 className="text-xs font-bold text-white">{rec.title}</h5>
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-1">{rec.description}</p>
+                      <p className="text-[9px] text-blue-400 mt-1">💡 {rec.action}</p>
+                    </div>
+                    <button
+                      onClick={() => applyRecommendation(rec)}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-bold transition-all flex-shrink-0"
+                    >
+                      تطبيق
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* نصائح */}
+        {analysis && analysis.tips.length > 0 && (
+          <div className="mb-4 p-3 bg-blue-500/10 rounded-lg border border-blue-500/30">
+            <div className="flex items-center gap-2 text-blue-400 text-sm mb-2">
+              <Info className="w-4 h-4" />
+              <span className="font-bold">نصائح مفيدة</span>
+            </div>
+            <div className="space-y-1">
+              {analysis.tips.map((tip, index) => (
+                <div key={index} className="text-xs text-blue-300/80 flex items-start gap-2">
+                  <span className="text-blue-500">✦</span>
+                  <span>
+                    <strong>{tip.message}</strong>
+                    {tip.details && <span className="text-blue-400/60">: {tip.details}</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* تحليل المعلمين */}
+        {analysis && (
+          <div className="mb-4">
+            <button
+              onClick={() => setExpandedSections(prev => ({ ...prev, teachers: !prev.teachers }))}
+              className="flex items-center justify-between w-full p-2 bg-slate-900 rounded-lg border border-slate-700 hover:border-slate-600 transition-all"
+            >
+              <span className="text-xs font-bold text-slate-400 flex items-center gap-2">
+                <Users className="w-3.5 h-3.5" />
+                تحليل المعلمين ({analysis.teachers.length})
+              </span>
+              <span>{expandedSections.teachers ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</span>
+            </button>
+            {expandedSections.teachers && (
+              <div className="mt-2 space-y-1 max-h-60 overflow-y-auto">
+                {analysis.teachers.sort((a, b) => a.name.localeCompare(b.name, 'ar')).map((teacher, index) => (
+                  <div key={index} className="flex items-center gap-2 p-2 bg-slate-900/50 rounded-lg border border-slate-700/50">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-xs text-white truncate">{teacher.name}</span>
+                      <span className="text-[8px] text-slate-500 mr-2">
+                        {teacher.subjectsCount} مواد - {teacher.totalHoursNeeded} حصة
+                      </span>
+                      {teacher.gap > 0 && (
+                        <span className="text-[8px] text-emerald-400 mr-1">
+                          (متاح: {teacher.gap})
+                        </span>
+                      )}
+                      {teacher.isOverloaded && (
+                        <span className="text-[8px] text-rose-400 mr-1">⚠️ مثقل</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <div className="w-20 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full ${
+                            teacher.utilization > 90 ? 'bg-rose-500' :
+                            teacher.utilization > 75 ? 'bg-amber-500' :
+                            teacher.utilization > 50 ? 'bg-emerald-500' :
+                            'bg-blue-500'
+                          }`}
+                          style={{ width: `${Math.min(teacher.utilization, 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-[8px] text-slate-400 min-w-[30px]">
+                        {teacher.utilization.toFixed(0)}%
+                      </span>
+                      {teacher.isOverloaded && <AlertTriangle className="w-3 h-3 text-rose-400" />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* زر الإغلاق */}
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all"
+          >
+            إغلاق المساعد
+          </button>
+          <button
+            onClick={() => {
+              setLoading(true);
+              setTimeout(() => {
+                setLoading(false);
+              }, 500);
+            }}
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all flex items-center gap-2"
+          >
+            <RefreshCw className="w-4 h-4" />
+            تحديث التحليل
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============ المكون الرئيسي المحسن ============
+export default function ScheduleManager() {
+  const [loading, setLoading] = useState(true);
+  const [processing, setProcessing] = useState(false);
+  const [message, setMessage] = useState({ type: '', text: '' });
+  
+  // ====== البيانات الأساسية ======
+  const [classes, setClasses] = useState([]);
+  const [teachers, setTeachers] = useState([]);
+  const [subjects, setSubjects] = useState([]);
+  const [existingSchedules, setExistingSchedules] = useState([]);
+  
+  // ====== إعدادات أيام الدوام ======
+  const [schoolDays, setSchoolDays] = useState(DEFAULT_SCHOOL_DAYS);
+  const [dayPeriods, setDayPeriods] = useState(DEFAULT_DAY_PERIODS);
+  const [periodLabels, setPeriodLabels] = useState(DEFAULT_PERIOD_LABELS);
+  const [periodsLoading, setPeriodsLoading] = useState(false);
+  const [showDaySettings, setShowDaySettings] = useState(false);
+  
+  // ====== إعدادات التوزيع ======
+  const [selectedSemester, setSelectedSemester] = useState(1);
+  const [academicYear, setAcademicYear] = useState(new Date().getFullYear().toString());
+  const [enableAdvancedConstraints, setEnableAdvancedConstraints] = useState(true);
+  
+  // ====== إعدادات المحاولات المحسنة ======
+  const [maxAttempts, setMaxAttempts] = useState(100);
+  const [attemptCount, setAttemptCount] = useState(0);
+  const [bestSchedule, setBestSchedule] = useState(null);
+  const [bestConflicts, setBestConflicts] = useState([]);
+  const [bestScore, setBestScore] = useState(0);
+  const [isMultiAttempt, setIsMultiAttempt] = useState(false);
+  const [attemptProgress, setAttemptProgress] = useState(0);
+  const [optimizationLevel, setOptimizationLevel] = useState('balanced');
+  
+  // ====== بيانات التوزيع مع حفظ في localStorage ======
+  const [subjectHours, setSubjectHours] = useState(() => {
+    const saved = localStorage.getItem('schedule_subjectHours');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+  
+  const [teacherMaxHours, setTeacherMaxHours] = useState(() => {
+    const saved = localStorage.getItem('schedule_teacherMaxHours');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+  
+  const [teacherPreferences, setTeacherPreferences] = useState(() => {
+    const saved = localStorage.getItem('schedule_teacherPreferences');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+  
+  const [teacherMaxDailyHours, setTeacherMaxDailyHours] = useState(() => {
+    const saved = localStorage.getItem('schedule_teacherMaxDailyHours');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+  
+  const [teacherPriority, setTeacherPriority] = useState(() => {
+    const saved = localStorage.getItem('schedule_teacherPriority');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return {};
+      }
+    }
+    return {};
+  });
+  
+  const [generatedSchedule, setGeneratedSchedule] = useState(null);
+  const [viewType, setViewType] = useState('class');
+  const [selectedClassView, setSelectedClassView] = useState('');
+  const [selectedTeacherView, setSelectedTeacherView] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showTeacherConflicts, setShowTeacherConflicts] = useState(true);
+  const [showStats, setShowStats] = useState(true);
+  const [conflictList, setConflictList] = useState([]);
+  const [allAttempts, setAllAttempts] = useState([]);
+  const [showAttemptHistory, setShowAttemptHistory] = useState(false);
+  const [showAssistant, setShowAssistant] = useState(false);
+  const [optimizationStats, setOptimizationStats] = useState(null);
+
+  // ============ حفظ البيانات في localStorage ============
+  useEffect(() => {
+    localStorage.setItem('schedule_subjectHours', JSON.stringify(subjectHours));
+  }, [subjectHours]);
+
+  useEffect(() => {
+    localStorage.setItem('schedule_teacherMaxHours', JSON.stringify(teacherMaxHours));
+  }, [teacherMaxHours]);
+
+  useEffect(() => {
+    localStorage.setItem('schedule_teacherPreferences', JSON.stringify(teacherPreferences));
+  }, [teacherPreferences]);
+
+  useEffect(() => {
+    localStorage.setItem('schedule_teacherMaxDailyHours', JSON.stringify(teacherMaxDailyHours));
+  }, [teacherMaxDailyHours]);
+
+  useEffect(() => {
+    localStorage.setItem('schedule_teacherPriority', JSON.stringify(teacherPriority));
+  }, [teacherPriority]);
+
+  // ============ جلب إعدادات المدرسة ============
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const q = query(collection(db, 'schoolSettings'));
+        const snapshot = await getDocs(q);
+        if (!snapshot.empty) {
+          const data = snapshot.docs[0].data();
+          if (data.schoolDays) {
+            setSchoolDays(data.schoolDays);
+          }
+          if (data.dayPeriods) {
+            setDayPeriods(data.dayPeriods);
+          }
+          if (data.periodLabels) {
+            setPeriodLabels(data.periodLabels);
+          }
+          console.log('✅ تم جلب إعدادات المدرسة:', data);
+        }
+      } catch (error) {
+        console.error('❌ خطأ في جلب الإعدادات:', error);
+      } finally {
+        setPeriodsLoading(false);
+      }
+    };
+    fetchSettings();
+  }, []);
+
+  // ============ الحصول على الأيام النشطة ============
+  const getActiveDays = useCallback(() => {
+    return schoolDays.filter(day => day.active);
+  }, [schoolDays]);
+
+  // ============ الحصول على عدد الحصص ليوم معين ============
+  const getDayPeriodCount = useCallback((dayId) => {
+    return dayPeriods[dayId] || 7;
+  }, [dayPeriods]);
+
+  // ============ الحصول على قائمة الحصص ليوم معين ============
+  const getPeriodsListForDay = useCallback((dayId) => {
+    const count = getDayPeriodCount(dayId);
+    const periods = [];
+    for (let i = 1; i <= count; i++) {
+      periods.push({
+        id: i,
+        label: periodLabels[String(i)] || `الحصة ${i}`,
+        order: i
+      });
+    }
+    return periods;
+  }, [getDayPeriodCount, periodLabels]);
+
+  // ============ جلب البيانات الأساسية ============
+  useEffect(() => {
+    const unsubClasses = onSnapshot(collection(db, 'classes'), (snapshot) => {
+      const classList = [];
+      snapshot.forEach(doc => {
+        classList.push({ id: doc.id, ...doc.data() });
+      });
+      setClasses(classList);
+    });
+
+    const unsubTeachers = onSnapshot(
+      query(collection(db, 'users'), where('role', '==', 'teacher')),
+      (snapshot) => {
+        const teacherList = [];
+        snapshot.forEach(doc => {
+          teacherList.push({ id: doc.id, ...doc.data() });
+        });
+        teacherList.sort((a, b) => {
+          return (a.fullName || '').localeCompare(b.fullName || '', 'ar');
+        });
+        setTeachers(teacherList);
+        
+        teacherList.forEach(teacher => {
+          if (!(teacher.id in teacherMaxHours)) {
+            setTeacherMaxHours(prev => ({ ...prev, [teacher.id]: 20 }));
+          }
+        });
+      }
+    );
+
+    const unsubSubjects = onSnapshot(collection(db, 'subjects'), (snapshot) => {
+      const subjectList = [];
+      snapshot.forEach(doc => {
+        subjectList.push({ id: doc.id, ...doc.data() });
+      });
+      setSubjects(subjectList);
+      setLoading(false);
+    });
+
+    const unsubSchedules = onSnapshot(collection(db, 'schedule'), (snapshot) => {
+      const scheduleList = [];
+      snapshot.forEach(doc => {
+        scheduleList.push({ id: doc.id, ...doc.data() });
+      });
+      setExistingSchedules(scheduleList);
+    });
+
+    return () => {
+      unsubClasses();
+      unsubTeachers();
+      unsubSubjects();
+      unsubSchedules();
+    };
+  }, []);
+
+  // ============ دوال مساعدة ============
+  const getTeacherName = useCallback((id) => {
+    const teacher = teachers.find(t => t.id === id);
+    return teacher?.fullName || 'غير محدد';
+  }, [teachers]);
+
+  const getSubjectName = useCallback((id) => {
+    const subject = subjects.find(s => s.id === id);
+    return subject?.name || 'غير محدد';
+  }, [subjects]);
+
+  const getClassName = useCallback((id) => {
+    const cls = classes.find(c => c.id === id);
+    return cls?.name || 'غير محدد';
+  }, [classes]);
+
+  const getSubjectColor = useCallback((subjectId) => {
+    const index = subjects.findIndex(s => s.id === subjectId);
+    return SUBJECT_COLORS[index % SUBJECT_COLORS.length];
+  }, [subjects]);
+
+  // ============ ترتيب الصفوف حسب الرقم ============
+  const getSortedClasses = useCallback(() => {
+    return [...classes].sort((a, b) => {
+      const numA = parseInt(a.name?.match(/\d+/)?.[0] || 0);
+      const numB = parseInt(b.name?.match(/\d+/)?.[0] || 0);
+      if (numA !== numB) return numA - numB;
+      return a.name.localeCompare(b.name, 'ar');
+    });
+  }, [classes]);
+
+  // ============ ترتيب المعلمين أبجدياً ============
+  const getSortedTeachers = useCallback(() => {
+    return [...teachers].sort((a, b) => {
+      return (a.fullName || '').localeCompare(b.fullName || '', 'ar');
+    });
+  }, [teachers]);
+
+  // ============ ترتيب المواد حسب الصف ============
+  const getSortedSubjectsByClass = useCallback(() => {
+    const sorted = [...subjects].sort((a, b) => {
+      const classA = classes.find(c => c.id === a.classId);
+      const classB = classes.find(c => c.id === b.classId);
+      const numA = parseInt(classA?.name?.match(/\d+/)?.[0] || 0);
+      const numB = parseInt(classB?.name?.match(/\d+/)?.[0] || 0);
+      
+      if (numA !== numB) return numA - numB;
+      return (classA?.name || '').localeCompare(classB?.name || '', 'ar');
+    });
+    return sorted;
+  }, [subjects, classes]);
+
+  // ============ حساب الإحصائيات المحسن ============
+  const getScheduleStats = useCallback((scheduleData) => {
+    const schedule = scheduleData || generatedSchedule;
+    if (!schedule) return null;
+
+    const activeDays = getActiveDays();
+    let totalSlots = 0;
+    let filledSlots = 0;
+    const teacherStats = {};
+    const classStats = {};
+    const dayStats = {};
+
+    const sortedClasses = getSortedClasses();
+    const sortedTeachers = getSortedTeachers();
+
+    sortedClasses.forEach(cls => {
+      classStats[cls.id] = 0;
+      activeDays.forEach(day => {
+        const daySchedule = schedule[cls.id]?.[day.id] || [];
+        const periodsCount = getDayPeriodCount(day.id);
+        totalSlots += periodsCount;
+        classStats[cls.id] += daySchedule.length;
+        filledSlots += daySchedule.length;
+        
+        if (!dayStats[day.id]) {
+          dayStats[day.id] = { filled: 0, total: 0 };
+        }
+        dayStats[day.id].total += periodsCount;
+        dayStats[day.id].filled += daySchedule.length;
+      });
+    });
+
+    sortedTeachers.forEach(teacher => {
+      teacherStats[teacher.id] = 0;
+    });
+
+    sortedClasses.forEach(cls => {
+      activeDays.forEach(day => {
+        const daySchedule = schedule[cls.id]?.[day.id] || [];
+        daySchedule.forEach(slot => {
+          if (slot.teacherId) {
+            teacherStats[slot.teacherId] = (teacherStats[slot.teacherId] || 0) + 1;
+          }
+        });
+      });
+    });
+
+    const emptySlots = totalSlots - filledSlots;
+
+    const utilization = totalSlots > 0 ? (filledSlots / totalSlots * 100) : 0;
+    
+    const teacherLoads = Object.values(teacherStats);
+    const avgLoad = teacherLoads.length > 0 ? teacherLoads.reduce((a, b) => a + b, 0) / teacherLoads.length : 0;
+    const loadVariance = teacherLoads.length > 0 ? 
+      teacherLoads.reduce((sum, load) => sum + Math.pow(load - avgLoad, 2), 0) / teacherLoads.length : 0;
+    const balanceScore = Math.max(0, 100 - (loadVariance / (avgLoad + 1)) * 10);
+
+    return {
+      totalSlots,
+      filledSlots,
+      emptySlots,
+      utilization,
+      teacherStats,
+      classStats,
+      dayStats,
+      score: utilization,
+      balanceScore: Math.min(balanceScore, 100),
+      avgTeacherLoad: avgLoad,
+      loadVariance
+    };
+  }, [classes, teachers, getActiveDays, getDayPeriodCount, generatedSchedule, getSortedClasses, getSortedTeachers]);
+
+  // ============ توليد بذرة عشوائية جديدة ============
+  const generateRandomSeed = () => {
+    return Math.floor(Math.random() * 1000000) + Date.now();
+  };
+
+  // ============ الخوارزمية المحسنة للوصول إلى 100% ============
+  const generateOptimizedSchedule = useCallback((seed = null, maxAttemptsPerSubject = 500) => {
+    const randomSeed = seed || generateRandomSeed();
+    const seededRandom = (max) => {
+      const x = Math.sin(randomSeed + max + Math.floor(Math.random() * 100)) * 10000;
+      return Math.abs(Math.floor(x) % max);
+    };
+
+    if (classes.length === 0 || teachers.length === 0) {
+      return null;
+    }
+
+    try {
+      const sortedClasses = getSortedClasses();
+      const sortedTeachers = getSortedTeachers();
+      const activeDays = getActiveDays();
+      
+      // ====== 1. هيكل البيانات ======
+      const schedule = {};
+      const teacherLoad = {};
+      const teacherDailyLoad = {};
+      const classDailyLoad = {};
+      const conflicts = [];
+
+      // تهيئة الجدول
+      sortedClasses.forEach(cls => {
+        schedule[cls.id] = {};
+        activeDays.forEach(day => {
+          schedule[cls.id][day.id] = [];
+        });
+      });
+
+      // تهيئة أحمال المعلمين
+      sortedTeachers.forEach(teacher => {
+        teacherLoad[teacher.id] = 0;
+        teacherDailyLoad[teacher.id] = {};
+        activeDays.forEach(day => {
+          teacherDailyLoad[teacher.id][day.id] = 0;
+        });
+      });
+
+      // تهيئة أحمال الصفوف
+      sortedClasses.forEach(cls => {
+        classDailyLoad[cls.id] = {};
+        activeDays.forEach(day => {
+          classDailyLoad[cls.id][day.id] = 0;
+        });
+      });
+
+      // ====== 2. تجميع المواد لكل معلم ======
+      const teacherSubjects = {};
+      sortedClasses.forEach(cls => {
+        const classSubjects = subjects.filter(s => s.classId === cls.id);
+        classSubjects.forEach(subject => {
+          const teacherId = subject.teacherId;
+          if (!teacherId) {
+            conflicts.push({
+              teacher: 'غير معين',
+              subject: subject.name,
+              class: cls.name,
+              remaining: subjectHours[subject.id] || 2,
+              reason: 'مادة بدون معلم'
+            });
+            return;
+          }
+          if (!teacherSubjects[teacherId]) {
+            teacherSubjects[teacherId] = [];
+          }
+          teacherSubjects[teacherId].push({
+            ...subject,
+            className: cls.name,
+            classId: cls.id,
+            hours: subjectHours[subject.id] || 2
+          });
+        });
+      });
+
+      // ====== 3. حساب الحمل المتوقع لكل معلم ======
+      const teacherWorkload = {};
+      sortedTeachers.forEach(teacher => {
+        const subjects = teacherSubjects[teacher.id] || [];
+        let totalHours = 0;
+        subjects.forEach(s => { totalHours += s.hours; });
+        teacherWorkload[teacher.id] = {
+          totalHours,
+          subjectCount: subjects.length,
+          maxHours: teacherMaxHours[teacher.id] || 20,
+          maxDaily: teacherMaxDailyHours[teacher.id],
+          preferredDays: teacherPreferences[teacher.id]?.preferredDays || [],
+          priority: teacherPriority[teacher.id] || 2,
+          subjects: subjects,
+          gap: (teacherMaxHours[teacher.id] || 20) - totalHours
+        };
+      });
+
+      // ====== 4. الترتيب الذكي للمعلمين ======
+      const orderedTeachers = [...sortedTeachers].sort((a, b) => {
+        const loadA = teacherWorkload[a.id];
+        const loadB = teacherWorkload[b.id];
+        if (!loadA || !loadB) return 0;
+        
+        if (loadA.priority !== loadB.priority) {
+          return loadA.priority - loadB.priority;
+        }
+        
+        const ratioA = loadA.totalHours / loadA.maxHours;
+        const ratioB = loadB.totalHours / loadB.maxHours;
+        if (ratioA !== ratioB) {
+          return ratioB - ratioA;
+        }
+        
+        const prefA = loadA.preferredDays.length;
+        const prefB = loadB.preferredDays.length;
+        if (prefA !== prefB) {
+          return prefA - prefB;
+        }
+        
+        return seededRandom(3) - 1;
+      });
+
+      // ====== 5. توزيع المعلمين ======
+      let totalAttempts = 0;
+      const maxTotalAttempts = maxAttemptsPerSubject * 10;
+
+      for (const teacher of orderedTeachers) {
+        const workload = teacherWorkload[teacher.id];
+        if (!workload || workload.subjects.length === 0) continue;
+        
+        const maxWeeklyHours = workload.maxHours;
+        const preferredDays = workload.preferredDays;
+        const maxDailyHours = workload.maxDaily;
+        
+        const sortedSubjects = [...workload.subjects].sort((a, b) => {
+          return b.hours - a.hours;
+        });
+        
+        for (const subject of sortedSubjects) {
+          if (totalAttempts > maxTotalAttempts) break;
+          
+          const hoursPerWeek = subject.hours;
+          const classId = subject.classId;
+          const className = subject.className;
+          
+          let remainingHours = hoursPerWeek;
+          let attempts = 0;
+          
+          while (remainingHours > 0 && attempts < maxAttemptsPerSubject) {
+            attempts++;
+            totalAttempts++;
+            
+            const dayDensity = activeDays.map(day => ({
+              ...day,
+              classLoad: classDailyLoad[classId]?.[day.id] || 0,
+              teacherLoad: teacherDailyLoad[teacher.id]?.[day.id] || 0,
+              totalPeriods: getDayPeriodCount(day.id),
+              currentPeriods: schedule[classId]?.[day.id]?.length || 0,
+              isPreferred: preferredDays.includes(day.id),
+              remainingCapacity: getDayPeriodCount(day.id) - (schedule[classId]?.[day.id]?.length || 0)
+            }));
+            
+            const sortedDays = [...dayDensity].sort((a, b) => {
+              if (a.isPreferred && !b.isPreferred) return -1;
+              if (!a.isPreferred && b.isPreferred) return 1;
+              
+              if (a.remainingCapacity !== b.remainingCapacity) {
+                return b.remainingCapacity - a.remainingCapacity;
+              }
+              
+              if (a.teacherLoad !== b.teacherLoad) {
+                return a.teacherLoad - b.teacherLoad;
+              }
+              
+              if (a.classLoad !== b.classLoad) {
+                return a.classLoad - b.classLoad;
+              }
+              
+              return seededRandom(3) - 1;
+            });
+            
+            let placed = false;
+            
+            for (const dayInfo of sortedDays) {
+              if (placed) break;
+              
+              const day = dayInfo;
+              const daySchedule = schedule[classId]?.[day.id];
+              if (!daySchedule) continue;
+              
+              const currentTeacherDayLoad = teacherDailyLoad[teacher.id]?.[day.id] || 0;
+              
+              if (maxDailyHours && currentTeacherDayLoad >= maxDailyHours) {
+                continue;
+              }
+              
+              if (teacherLoad[teacher.id] >= maxWeeklyHours) {
+                continue;
+              }
+              
+              const dayPeriodsCount = getDayPeriodCount(day.id);
+              const availablePeriods = [];
+              
+              for (let p = 1; p <= dayPeriodsCount; p++) {
+                const existing = daySchedule.find(s => s.period === p);
+                if (!existing) {
+                  let teacherBusy = false;
+                  for (const otherClass of sortedClasses) {
+                    if (otherClass.id === classId) continue;
+                    const otherSchedule = schedule[otherClass.id]?.[day.id] || [];
+                    const teacherSlot = otherSchedule.find(s => s.period === p && s.teacherId === teacher.id);
+                    if (teacherSlot) {
+                      teacherBusy = true;
+                      break;
+                    }
+                  }
+                  
+                  if (!teacherBusy) {
+                    availablePeriods.push(p);
+                  }
+                }
+              }
+              
+              if (availablePeriods.length > 0) {
+                let bestPeriod;
+                
+                if (availablePeriods.length === 1) {
+                  bestPeriod = availablePeriods[0];
+                } else {
+                  const midPoint = dayPeriodsCount / 2;
+                  const sortedPeriods = [...availablePeriods].sort((a, b) => {
+                    const distA = Math.abs(a - midPoint);
+                    const distB = Math.abs(b - midPoint);
+                    if (distA !== distB) return distA - distB;
+                    return seededRandom(3) - 1;
+                  });
+                  bestPeriod = sortedPeriods[0];
+                }
+                
+                const periodLabel = periodLabels[String(bestPeriod)] || `الحصة ${bestPeriod}`;
+                
+                const slot = {
+                  period: bestPeriod,
+                  periodLabel: periodLabel,
+                  subjectId: subject.id,
+                  classId: classId,
+                  teacherId: teacher.id,
+                  subjectName: subject.name,
+                  className: className,
+                  teacherName: teacher.fullName,
+                  color: getSubjectColor(subject.id),
+                  priority: teacherPriority[teacher.id] || 2
+                };
+                
+                daySchedule.push(slot);
+                
+                teacherLoad[teacher.id] = (teacherLoad[teacher.id] || 0) + 1;
+                teacherDailyLoad[teacher.id][day.id] = (teacherDailyLoad[teacher.id][day.id] || 0) + 1;
+                classDailyLoad[classId][day.id] = (classDailyLoad[classId][day.id] || 0) + 1;
+                remainingHours--;
+                placed = true;
+              }
+            }
+            
+            // ====== 7. محاولة التوزيع الإجباري ======
+            if (!placed && remainingHours > 0) {
+              for (const dayInfo of sortedDays) {
+                if (placed) break;
+                
+                const day = dayInfo;
+                const daySchedule = schedule[classId]?.[day.id];
+                if (!daySchedule) continue;
+                
+                const dayPeriodsCount = getDayPeriodCount(day.id);
+                for (let p = 1; p <= dayPeriodsCount; p++) {
+                  if (placed) break;
+                  
+                  const existing = daySchedule.find(s => s.period === p);
+                  if (!existing) {
+                    const slot = {
+                      period: p,
+                      periodLabel: periodLabels[String(p)] || `الحصة ${p}`,
+                      subjectId: subject.id,
+                      classId: classId,
+                      teacherId: teacher.id,
+                      subjectName: subject.name,
+                      className: className,
+                      teacherName: teacher.fullName,
+                      color: getSubjectColor(subject.id),
+                      priority: teacherPriority[teacher.id] || 2,
+                      isForced: true
+                    };
+                    
+                    daySchedule.push(slot);
+                    teacherLoad[teacher.id] = (teacherLoad[teacher.id] || 0) + 1;
+                    teacherDailyLoad[teacher.id][day.id] = (teacherDailyLoad[teacher.id][day.id] || 0) + 1;
+                    classDailyLoad[classId][day.id] = (classDailyLoad[classId][day.id] || 0) + 1;
+                    remainingHours--;
+                    placed = true;
+                    
+                    conflicts.push({
+                      teacher: teacher.fullName,
+                      subject: subject.name,
+                      class: className,
+                      period: p,
+                      day: day.label,
+                      reason: 'تم إجبار التوزيع لضمان اكتمال الجدول'
+                    });
+                  }
+                }
+              }
+            }
+            
+            if (!placed && remainingHours > 0) {
+              conflicts.push({
+                teacher: teacher.fullName,
+                subject: subject.name,
+                class: className,
+                remaining: remainingHours,
+                reason: 'لا توجد فترات متاحة على الإطلاق'
+              });
+              break;
+            }
+          }
+          
+          if (remainingHours > 0) {
+            conflicts.push({
+              teacher: teacher.fullName,
+              subject: subject.name,
+              class: className,
+              remaining: remainingHours,
+              reason: 'تجاوز الحد الأقصى للمحاولات'
+            });
+          }
+        }
+      }
+
+      // ====== 8. إعادة ترتيب الجدول ======
+      sortedClasses.forEach(cls => {
+        activeDays.forEach(day => {
+          if (schedule[cls.id]?.[day.id]) {
+            schedule[cls.id][day.id].sort((a, b) => a.period - b.period);
+          }
+        });
+      });
+
+      // ====== 9. حساب النتيجة ======
+      const stats = getScheduleStats(schedule);
+      const score = stats ? stats.score : 0;
+
+      return {
+        schedule,
+        conflicts,
+        score,
+        seed: randomSeed,
+        stats
+      };
+
+    } catch (error) {
+      console.error('❌ خطأ في إنشاء الجدول:', error);
+      return null;
+    }
+  }, [classes, teachers, subjects, subjectHours, teacherMaxHours, teacherPreferences, 
+      teacherMaxDailyHours, teacherPriority, getSubjectColor, 
+      getDayPeriodCount, periodLabels, getActiveDays, getScheduleStats, getSortedClasses, getSortedTeachers]);
+
+  // ============ توليد جدول متعدد المحاولات المحسن ============
+  const generateMultiAttemptSchedule = useCallback(async () => {
+    if (classes.length === 0) {
+      setMessage({ type: 'error', text: '❌ لا توجد صفوف' });
+      return;
+    }
+
+    if (teachers.length === 0) {
+      setMessage({ type: 'error', text: '❌ لا يوجد معلمين' });
+      return;
+    }
+
+    setProcessing(true);
+    setAllAttempts([]);
+    setBestSchedule(null);
+    setBestConflicts([]);
+    setBestScore(0);
+    setAttemptCount(0);
+    setAttemptProgress(0);
+
+    let bestResult = null;
+    let bestScoreValue = -1;
+    const attemptsList = [];
+    
+    const attemptsMap = {
+      fast: Math.min(maxAttempts, 50),
+      balanced: maxAttempts,
+      thorough: Math.max(maxAttempts * 2, 200)
+    };
+    const totalAttempts = attemptsMap[optimizationLevel] || maxAttempts;
+
+    try {
+      for (let i = 0; i < totalAttempts; i++) {
+        setAttemptCount(i + 1);
+        setAttemptProgress(((i + 1) / totalAttempts) * 100);
+        
+        const seed = generateRandomSeed();
+        const result = generateOptimizedSchedule(seed, optimizationLevel === 'thorough' ? 1000 : 500);
+        
+        if (result) {
+          attemptsList.push({
+            attempt: i + 1,
+            score: result.score,
+            conflicts: result.conflicts.length,
+            seed: result.seed,
+            schedule: result.schedule,
+            conflictsList: result.conflicts
+          });
+
+          if (result.score > bestScoreValue) {
+            bestScoreValue = result.score;
+            bestResult = result;
+            
+            if (result.score >= 100) {
+              break;
+            }
+          }
+        }
+
+        if (i % 10 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 10));
+        }
+      }
+
+      if (bestResult) {
+        setBestSchedule(bestResult.schedule);
+        setBestConflicts(bestResult.conflicts);
+        setBestScore(bestResult.score);
+        setAllAttempts(attemptsList);
+        setGeneratedSchedule(bestResult.schedule);
+        setConflictList(bestResult.conflicts);
+        
+        const stats = getScheduleStats(bestResult.schedule);
+        setOptimizationStats(stats);
+        
+        if (bestResult.conflicts.length > 0) {
+          setMessage({ 
+            type: 'warning', 
+            text: `✅ تم اختيار أفضل جدول من ${attemptsList.length} محاولة. عدد التعارضات: ${bestResult.conflicts.length} - نسبة الإشغال: ${bestResult.score.toFixed(1)}%` 
+          });
+        } else if (bestResult.score >= 100) {
+          setMessage({ 
+            type: 'success', 
+            text: `🎉 تم الوصول إلى نسبة 100%! جدول مثالي من ${attemptsList.length} محاولة!` 
+          });
+        } else {
+          setMessage({ 
+            type: 'success', 
+            text: `✅ تم اختيار الجدول الأمثل من ${attemptsList.length} محاولة! نسبة الإشغال: ${bestResult.score.toFixed(1)}%` 
+          });
+        }
+      } else {
+        setMessage({ type: 'error', text: '❌ فشل في إنشاء أي جدول صحيح' });
+      }
+
+    } catch (error) {
+      setMessage({ type: 'error', text: '❌ خطأ في إنشاء الجدول: ' + error.message });
+    } finally {
+      setProcessing(false);
+    }
+  }, [classes.length, teachers.length, maxAttempts, generateOptimizedSchedule, getScheduleStats, optimizationLevel]);
+
+  // ============ إنشاء جدول عادي (محاولة واحدة) ============
+  const generateSingleAttemptSchedule = useCallback(() => {
+    const result = generateOptimizedSchedule(null, 500);
+    if (result) {
+      setGeneratedSchedule(result.schedule);
+      setConflictList(result.conflicts);
+      setBestSchedule(result.schedule);
+      setBestConflicts(result.conflicts);
+      setBestScore(result.score);
+      setAllAttempts([]);
+      
+      const stats = getScheduleStats(result.schedule);
+      setOptimizationStats(stats);
+      
+      if (result.conflicts.length > 0) {
+        setMessage({ 
+          type: 'warning', 
+          text: `⚠️ تم إنشاء الجدول مع ${result.conflicts.length} تعارض - نسبة الإشغال: ${result.score.toFixed(1)}%` 
+        });
+      } else if (result.score >= 100) {
+        setMessage({ 
+          type: 'success', 
+          text: `🎉 تم الوصول إلى نسبة 100%! جدول مثالي!` 
+        });
+      } else {
+        setMessage({ 
+          type: 'success', 
+          text: `✅ تم إنشاء الجدول بنجاح! نسبة الإشغال: ${result.score.toFixed(1)}%` 
+        });
+      }
+    } else {
+      setMessage({ type: 'error', text: '❌ فشل في إنشاء الجدول' });
+    }
+  }, [generateOptimizedSchedule, getScheduleStats]);
+
+  // ============ حفظ الجدول ============
+  const saveSchedule = async () => {
+    const scheduleToSave = generatedSchedule || bestSchedule;
+    if (!scheduleToSave) {
+      setMessage({ type: 'error', text: '❌ لا يوجد جدول لحفظه' });
+      return;
+    }
+
+    try {
+      setProcessing(true);
+
+      const scheduleData = {
+        academicYear: academicYear,
+        semester: selectedSemester,
+        schedule: scheduleToSave,
+        schoolDays: schoolDays,
+        dayPeriods: dayPeriods,
+        periodLabels: periodLabels,
+        teacherMaxHours: teacherMaxHours,
+        teacherMaxDailyHours: teacherMaxDailyHours,
+        teacherPreferences: teacherPreferences,
+        teacherPriority: teacherPriority,
+        subjectHours: subjectHours,
+        conflicts: conflictList,
+        bestScore: bestScore,
+        attempts: maxAttempts,
+        optimizationLevel: optimizationLevel,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      await addDoc(collection(db, 'schedule'), scheduleData);
+      setMessage({ type: 'success', text: '✅ تم حفظ الجدول بنجاح!' });
+
+    } catch (error) {
+      setMessage({ type: 'error', text: '❌ خطأ في حفظ الجدول: ' + error.message });
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  // ============ عرض التعارضات ============
+  const renderConflicts = () => {
+    const currentConflicts = conflictList || bestConflicts || [];
+    if (currentConflicts.length === 0) {
+      return (
+        <div className="p-3 bg-emerald-500/10 rounded-lg border border-emerald-500/30">
+          <div className="flex items-center gap-2 text-emerald-400 text-sm">
+            <CheckCircle className="w-4 h-4" />
+            <span>✅ لا توجد تعارضات في الجدول</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-3 bg-amber-500/10 rounded-lg border border-amber-500/30">
+        <div className="flex items-center gap-2 text-amber-400 text-sm mb-2">
+          <AlertTriangle className="w-4 h-4" />
+          <span>⚠️ تم العثور على {currentConflicts.length} تعارض/حصص غير موزعة</span>
+        </div>
+        <div className="space-y-1 max-h-40 overflow-y-auto">
+          {currentConflicts.map((conflict, index) => (
+            <div key={index} className="text-xs text-amber-300/80 flex items-start gap-2">
+              <span className="text-amber-500">•</span>
+              <span>
+                <strong>{conflict.teacher}</strong> - مادة {conflict.subject} في صف {conflict.class}:
+                {conflict.remaining ? ` تبقى ${conflict.remaining} حصة` : ''}
+                {conflict.period ? ` الحصة ${conflict.period}` : ''}
+                {conflict.day ? ` يوم ${conflict.day}` : ''}
+                - السبب: {conflict.reason}
+              </span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 text-[10px] text-amber-400/60">
+          <Info className="w-3 h-3 inline ml-1" />
+          يُنصح بزيادة عدد الحصص اليومية للمعلم أو تعديل تفضيلاته
+        </div>
+      </div>
+    );
+  };
+
+  // ============ عرض سجل المحاولات ============
+  const renderAttemptHistory = () => {
+    if (allAttempts.length === 0) return null;
+
+    const sortedAttempts = [...allAttempts].sort((a, b) => b.score - a.score);
+
+    return (
+      <div className="mt-3 p-3 bg-slate-800 rounded-lg border border-slate-700">
+        <div className="flex items-center justify-between mb-2">
+          <h5 className="text-xs font-bold text-slate-400 flex items-center gap-2">
+            <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
+            سجل المحاولات ({allAttempts.length} محاولة)
+          </h5>
+          <span className="text-[10px] text-emerald-400">
+            أفضل نسبة: {bestScore.toFixed(1)}%
+          </span>
+        </div>
+        <div className="space-y-1 max-h-32 overflow-y-auto">
+          {sortedAttempts.slice(0, 20).map((attempt) => (
+            <div key={attempt.attempt} className="flex items-center gap-3 text-xs">
+              <span className="text-slate-500 min-w-[60px]"># {attempt.attempt}</span>
+              <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                <div 
+                  className={`h-full rounded-full transition-all ${
+                    attempt.score >= 100 ? 'bg-emerald-500' :
+                    attempt.score >= bestScore && attempt.attempt === sortedAttempts[0]?.attempt 
+                      ? 'bg-emerald-500' 
+                      : 'bg-blue-500'
+                  }`}
+                  style={{ width: `${attempt.score}%` }}
+                />
+              </div>
+              <span className="text-slate-400 min-w-[60px] text-right">
+                {attempt.score.toFixed(1)}%
+              </span>
+              <span className={`text-[8px] ${attempt.conflicts === 0 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                ⚠️{attempt.conflicts}
+              </span>
+              {attempt.score >= 100 && (
+                <span className="text-[8px] text-emerald-400">🎉 مثالي</span>
+              )}
+            </div>
+          ))}
+          {allAttempts.length > 20 && (
+            <div className="text-[8px] text-slate-500 text-center">
+              ... و {allAttempts.length - 20} محاولة أخرى
+            </div>
+          )}
+        </div>
+        <div className="mt-1 text-[8px] text-slate-500">
+          ✨ تم استخدام بذور عشوائية مختلفة لكل محاولة مع تحسين مستمر
+        </div>
+      </div>
+    );
+  };
+
+  // ============ عرض جدول الصف المحسن ============
+  const renderClassSchedule = useCallback((classId) => {
+    const schedule = generatedSchedule || bestSchedule;
+    if (!schedule || !schedule[classId]) return null;
+    const classSchedule = schedule[classId];
+    const className = getClassName(classId);
+    const activeDays = getActiveDays();
+    const sortedClasses = getSortedClasses();
+
+    return (
+      <div key={classId} className="bg-slate-900 rounded-xl p-4 border border-slate-800 mb-6 transition-all hover:border-blue-500/30">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h4 className="text-sm font-bold text-blue-400 flex items-center gap-2">
+            <School className="w-4 h-4" />
+            {className}
+          </h4>
+          <div className="flex gap-1">
+            {activeDays.map(day => (
+              <span key={day.id} className="text-[8px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
+                {day.short}: {classSchedule[day.id]?.length || 0}/{getDayPeriodCount(day.id)}
+              </span>
+            ))}
+          </div>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-700">
+                <th className="p-2 text-center text-slate-400 min-w-[50px]">#</th>
+                {activeDays.map(day => {
+                  const count = getDayPeriodCount(day.id);
+                  return (
+                    <th key={day.id} className="p-2 text-center text-blue-400 min-w-[110px]">
+                      {day.label}
+                      <span className="block text-[8px] text-slate-500 font-normal">
+                        ({classSchedule[day.id]?.length || 0}/{count} ح)
+                      </span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const maxPeriods = Math.max(...activeDays.map(day => getDayPeriodCount(day.id)));
+                const rows = [];
+                for (let p = 1; p <= maxPeriods; p++) {
+                  rows.push(p);
+                }
+                return rows.map(periodNumber => (
+                  <tr key={periodNumber} className="border-b border-slate-800 hover:bg-slate-800/30">
+                    <td className="p-2 text-center text-slate-400 font-mono text-[10px]">
+                      {periodNumber}
+                    </td>
+                    {activeDays.map(day => {
+                      const dayPeriodsCount = getDayPeriodCount(day.id);
+                      if (periodNumber > dayPeriodsCount) {
+                        return (
+                          <td key={day.id} className="p-2 text-center text-slate-700 text-xs">
+                            —
+                          </td>
+                        );
+                      }
+                      const slot = classSchedule[day.id]?.find(s => s.period === periodNumber);
+                      return (
+                        <td key={day.id} className="p-2 text-center">
+                          {slot ? (
+                            <div 
+                              className={`p-1.5 rounded border transition-all hover:scale-105 cursor-default ${slot.isForced ? 'border-amber-500/50 bg-amber-500/10' : ''}`}
+                              style={{ 
+                                backgroundColor: `${slot.color || '#3B82F6'}20`,
+                                borderColor: slot.isForced ? '#F59E0B' : `${slot.color || '#3B82F6'}40`
+                              }}
+                            >
+                              <div className="text-[10px] font-bold text-white truncate">{slot.subjectName}</div>
+                              <div className="text-[8px] text-slate-400 truncate">{slot.teacherName}</div>
+                              {slot.isForced && (
+                                <div className="text-[6px] text-amber-400">⚠️ إجباري</div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-slate-700 text-xs">•</div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ));
+              })()}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }, [generatedSchedule, bestSchedule, getClassName, getActiveDays, getDayPeriodCount, getSortedClasses]);
+
+  // ============ عرض جدول المعلم المحسن ============
+  const renderTeacherSchedule = useCallback((teacherId) => {
+    const schedule = generatedSchedule || bestSchedule;
+    if (!schedule) return null;
+    
+    const teacher = teachers.find(t => t.id === teacherId);
+    if (!teacher) return null;
+    
+    const activeDays = getActiveDays();
+    const sortedClasses = getSortedClasses();
+
+    const teacherSchedule = {};
+    activeDays.forEach(day => {
+      teacherSchedule[day.id] = [];
+    });
+
+    sortedClasses.forEach(cls => {
+      if (!schedule[cls.id]) return;
+      activeDays.forEach(day => {
+        const daySchedule = schedule[cls.id][day.id] || [];
+        daySchedule.forEach(slot => {
+          if (slot.teacherId === teacherId) {
+            teacherSchedule[day.id].push({
+              ...slot,
+              className: cls.name
+            });
+          }
+        });
+      });
+    });
+
+    activeDays.forEach(day => {
+      teacherSchedule[day.id].sort((a, b) => a.period - b.period);
+    });
+
+    const totalHours = Object.values(teacherSchedule).reduce((sum, day) => sum + day.length, 0);
+    const maxHours = teacherMaxHours[teacherId] || 20;
+    const isOverloaded = totalHours > maxHours;
+    const maxDaily = teacherMaxDailyHours[teacherId];
+
+    return (
+      <div key={teacherId} className="bg-slate-900 rounded-xl p-4 border border-slate-800 mb-6 transition-all hover:border-emerald-500/30">
+        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <div className="flex items-center gap-3">
+            <h4 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+              <User className="w-4 h-4" />
+              {teacher.fullName}
+            </h4>
+            <span className={`text-[10px] px-2 py-0.5 rounded ${isOverloaded ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+              {totalHours} / {maxHours} حصة
+              {isOverloaded && ' ⚠️'}
+            </span>
+            {maxDaily && (
+              <span className="text-[8px] px-1.5 py-0.5 bg-blue-500/20 text-blue-400 rounded">
+                حد يومي: {maxDaily}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-1">
+            {activeDays.map(day => (
+              <span key={day.id} className="text-[8px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
+                {day.short}: {teacherSchedule[day.id]?.length || 0}
+              </span>
+            ))}
+          </div>
+        </div>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full text-right text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-slate-700">
+                <th className="p-2 text-center text-slate-400 min-w-[50px]">#</th>
+                {activeDays.map(day => (
+                  <th key={day.id} className="p-2 text-center text-emerald-400 min-w-[110px]">
+                    {day.label}
+                    <span className="block text-[8px] text-slate-500 font-normal">
+                      ({getDayPeriodCount(day.id)} ح)
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(() => {
+                const maxPeriods = Math.max(...activeDays.map(day => getDayPeriodCount(day.id)));
+                const rows = [];
+                for (let p = 1; p <= maxPeriods; p++) {
+                  rows.push(p);
+                }
+                return rows.map(periodNumber => {
+                  let hasConflict = false;
+                  const conflictList = [];
+                  
+                  activeDays.forEach(day => {
+                    const slotsInDay = teacherSchedule[day.id]?.filter(s => s.period === periodNumber) || [];
+                    if (slotsInDay.length > 1) {
+                      hasConflict = true;
+                      conflictList.push({
+                        day: day.label,
+                        count: slotsInDay.length,
+                        subjects: slotsInDay.map(s => s.subjectName).join('، ')
+                      });
+                    }
+                  });
+                  
+                  return (
+                    <tr key={periodNumber} className={`border-b border-slate-800 ${hasConflict ? 'bg-rose-500/5' : ''}`}>
+                      <td className="p-2 text-center text-slate-400 font-mono text-[10px]">
+                        {periodNumber}
+                      </td>
+                      {activeDays.map(day => {
+                        const dayPeriodsCount = getDayPeriodCount(day.id);
+                        if (periodNumber > dayPeriodsCount) {
+                          return (
+                            <td key={day.id} className="p-2 text-center text-slate-700 text-xs">
+                              —
+                            </td>
+                          );
+                        }
+                        const slot = teacherSchedule[day.id]?.find(s => s.period === periodNumber);
+                        const slotsInSameDay = teacherSchedule[day.id]?.filter(s => s.period === periodNumber) || [];
+                        const isConflictInSameDay = slotsInSameDay.length > 1;
+                        
+                        return (
+                          <td key={day.id} className="p-2 text-center">
+                            {slot ? (
+                              <div 
+                                className={`p-1.5 rounded border transition-all hover:scale-105 cursor-default ${
+                                  isConflictInSameDay ? 'border-rose-500/50 bg-rose-500/20' : 
+                                  slot.isForced ? 'border-amber-500/50 bg-amber-500/10' : ''
+                                }`}
+                                style={{ 
+                                  backgroundColor: isConflictInSameDay ? 'rgba(244,63,94,0.2)' : 
+                                    slot.isForced ? 'rgba(245,158,11,0.1)' : `${slot.color || '#10B981'}20`,
+                                  borderColor: isConflictInSameDay ? '#F43F5E' : 
+                                    slot.isForced ? '#F59E0B' : `${slot.color || '#10B981'}40`
+                                }}
+                              >
+                                <div className="text-[10px] font-bold text-white truncate">{slot.subjectName}</div>
+                                <div className="text-[8px] text-slate-400 truncate">🏫 {slot.className}</div>
+                                {isConflictInSameDay && <div className="text-[6px] text-rose-400">⚠️ تعارض</div>}
+                                {slot.isForced && !isConflictInSameDay && (
+                                  <div className="text-[6px] text-amber-400">⚠️ إجباري</div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="text-slate-700 text-xs">•</div>
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                });
+              })()}
+            </tbody>
+          </table>
+        </div>
+        
+        {showTeacherConflicts && (
+          <div className="mt-2 p-2 bg-amber-500/10 rounded border border-amber-500/20">
+            <div className="flex items-center gap-2 flex-wrap">
+              <AlertTriangle className="w-3 h-3 text-amber-400" />
+              <span className="text-[9px] text-amber-400">
+                {activeDays.map(day => {
+                  const conflictsList = [];
+                  const daySlots = teacherSchedule[day.id] || [];
+                  const periodCounts = {};
+                  daySlots.forEach(s => {
+                    periodCounts[s.period] = (periodCounts[s.period] || 0) + 1;
+                  });
+                  
+                  Object.keys(periodCounts).forEach(period => {
+                    if (periodCounts[period] > 1) {
+                      conflictsList.push(`الحصة ${period} (${periodCounts[period]} حصص)`);
+                    }
+                  });
+                  
+                  if (conflictsList.length > 0) {
+                    return `يوم ${day.label}: ${conflictsList.join('، ')}`;
+                  }
+                  return null;
+                }).filter(c => c).join(' | ')}
+                {Object.values(teacherSchedule).every(day => day.length === 0) && 'لا توجد حصص'}
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }, [generatedSchedule, bestSchedule, teachers, teacherMaxHours, teacherMaxDailyHours, getActiveDays, getDayPeriodCount, showTeacherConflicts, getSortedClasses]);
+
+  // ============ عرض الإحصائيات المحسنة ============
+  const renderStats = () => {
+    const stats = optimizationStats || getScheduleStats(generatedSchedule || bestSchedule);
+    if (!stats) return null;
+
+    const statsData = [
+      { key: 'totalSlots', label: 'إجمالي الحصص', value: stats.totalSlots, color: 'text-white' },
+      { key: 'filledSlots', label: 'الحصص المملوءة', value: stats.filledSlots, color: 'text-emerald-400' },
+      { key: 'emptySlots', label: 'الحصص الفارغة', value: stats.emptySlots, color: 'text-amber-400' },
+      { key: 'utilization', label: 'نسبة الإشغال', value: `${stats.utilization.toFixed(1)}%`, color: stats.utilization >= 100 ? 'text-emerald-400' : 'text-blue-400' },
+      { key: 'balanceScore', label: 'توازن التوزيع', value: `${stats.balanceScore.toFixed(1)}%`, color: stats.balanceScore >= 80 ? 'text-emerald-400' : 'text-blue-400' }
+    ];
+
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
+        {statsData.map(stat => (
+          <div key={stat.key} className="bg-slate-800 p-3 rounded-lg border border-slate-700">
+            <div className="text-[8px] text-slate-400">{stat.label}</div>
+            <div className={`text-lg font-bold ${stat.color}`}>{stat.value}</div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ============ عرض عدد حصص المواد ============
+  const renderSubjectHours = () => {
+    const sortedSubjects = getSortedSubjectsByClass();
+    
+    const groupedByClass = {};
+    sortedSubjects.forEach(subject => {
+      const className = getClassName(subject.classId);
+      if (!groupedByClass[className]) {
+        groupedByClass[className] = [];
+      }
+      groupedByClass[className].push(subject);
+    });
+
+    return (
+      <div className="space-y-3 max-h-60 overflow-y-auto">
+        {Object.keys(groupedByClass).sort((a, b) => {
+          const numA = parseInt(a.match(/\d+/)?.[0] || 0);
+          const numB = parseInt(b.match(/\d+/)?.[0] || 0);
+          if (numA !== numB) return numA - numB;
+          return a.localeCompare(b, 'ar');
+        }).map(className => (
+          <div key={className} className="border-b border-slate-700 pb-2 last:border-0">
+            <div className="text-xs font-bold text-blue-400 mb-2">🏫 {className}</div>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {groupedByClass[className].map(subject => (
+                <div key={subject.id} className="flex items-center gap-2 p-2 bg-slate-800 rounded-lg">
+                  <div 
+                    className="w-2 h-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: getSubjectColor(subject.id) }}
+                  />
+                  <span className="text-xs text-white flex-1 truncate" title={subject.name}>
+                    {subject.name}
+                  </span>
+                  <input
+                    type="number"
+                    value={subjectHours[subject.id] || 2}
+                    onChange={(e) => setSubjectHours(prev => ({ 
+                      ...prev, 
+                      [subject.id]: Number(e.target.value) 
+                    }))}
+                    className="w-12 p-1 bg-slate-700 border border-slate-600 rounded text-white text-sm text-center flex-shrink-0"
+                    min="0"
+                    max="10"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ============ عرض تفضيلات المعلمين ============
+  const renderTeacherPreferences = () => {
+    const activeDays = getActiveDays();
+    const sortedTeachers = getSortedTeachers();
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+        {sortedTeachers.map(teacher => (
+          <div key={teacher.id} className="flex flex-col gap-1 p-3 bg-slate-800 rounded-lg border border-slate-700">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-white font-bold truncate">{teacher.fullName}</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] text-slate-400">أولوية:</span>
+                <select
+                  value={teacherPriority[teacher.id] || 1}
+                  onChange={(e) => setTeacherPriority(prev => ({
+                    ...prev,
+                    [teacher.id]: Number(e.target.value)
+                  }))}
+                  className="w-14 p-0.5 bg-slate-700 border border-slate-600 rounded text-white text-[10px]"
+                >
+                  <option value={1}>1 (عالية)</option>
+                  <option value={2}>2 (متوسطة)</option>
+                  <option value={3}>3 (منخفضة)</option>
+                </select>
+              </div>
+            </div>
+            
+            <div className="flex gap-1 flex-wrap">
+              {activeDays.map(day => (
+                <button
+                  key={day.id}
+                  onClick={() => {
+                    const prefs = teacherPreferences[teacher.id]?.preferredDays || [];
+                    const newPrefs = prefs.includes(day.id) 
+                      ? prefs.filter(d => d !== day.id)
+                      : [...prefs, day.id];
+                    setTeacherPreferences(prev => ({
+                      ...prev,
+                      [teacher.id]: { preferredDays: newPrefs }
+                    }));
+                  }}
+                  className={`px-1.5 py-0.5 rounded text-[8px] font-bold transition-all ${
+                    teacherPreferences[teacher.id]?.preferredDays?.includes(day.id)
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-slate-700 text-slate-500 hover:bg-slate-600'
+                  }`}
+                >
+                  {day.short}
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] text-slate-400">حد يومي:</span>
+                <input
+                  type="number"
+                  value={teacherMaxDailyHours[teacher.id] || ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setTeacherMaxDailyHours(prev => ({
+                      ...prev,
+                      [teacher.id]: value === '' ? undefined : Number(value)
+                    }));
+                  }}
+                  className="w-12 p-0.5 bg-slate-700 border border-slate-600 rounded text-white text-xs text-center"
+                  min="1"
+                  max="10"
+                  placeholder="∞"
+                />
+                <span className="text-[8px] text-slate-500">(فارغ = غير محدود)</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span className="text-[8px] text-slate-400">نصاب:</span>
+                <input
+                  type="number"
+                  value={teacherMaxHours[teacher.id] || 20}
+                  onChange={(e) => setTeacherMaxHours(prev => ({ 
+                    ...prev, 
+                    [teacher.id]: Number(e.target.value) 
+                  }))}
+                  className="w-14 p-0.5 bg-slate-700 border border-slate-600 rounded text-white text-xs text-center"
+                  min="1"
+                  max="40"
+                />
+                <span className="text-[8px] text-slate-500">ح/أسبوع</span>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  // ============ عرض إعدادات الأيام ============
+  const renderDaySettings = () => {
+    if (!showDaySettings) return null;
+
+    return (
+      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+        <div className="bg-slate-800 rounded-2xl p-6 max-w-lg w-full mx-4 border border-slate-700 shadow-2xl max-h-[90vh] overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <CalendarDays className="w-5 h-5 text-blue-400" />
+              إعدادات أيام الدوام
+            </h3>
+            <button
+              onClick={() => setShowDaySettings(false)}
+              className="p-1.5 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-white transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <div className="space-y-4">
+            <p className="text-xs text-slate-400">
+              حدد أيام الدوام في الأسبوع وعدد الحصص لكل يوم
+            </p>
+
+            {ALL_WEEK_DAYS.map(day => {
+              const isActive = schoolDays.find(d => d.id === day.id)?.active || false;
+              const periodCount = dayPeriods[day.id] || 7;
+
+              return (
+                <div key={day.id} className="flex items-center gap-3 p-3 bg-slate-900 rounded-lg border border-slate-700">
+                  <div className="flex items-center gap-2 flex-1">
+                    <button
+                      onClick={() => {
+                        setSchoolDays(prev => 
+                          prev.map(d => 
+                            d.id === day.id ? { ...d, active: !d.active } : d
+                          )
+                        );
+                        if (!isActive) {
+                          setSchoolDays(prev => {
+                            const exists = prev.find(d => d.id === day.id);
+                            if (!exists) {
+                              return [...prev, { id: day.id, label: day.label, short: day.short, active: true }];
+                            }
+                            return prev;
+                          });
+                        }
+                      }}
+                      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+                        isActive 
+                          ? 'bg-emerald-600 text-white' 
+                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600'
+                      }`}
+                    >
+                      {isActive ? <CheckCircle className="w-4 h-4" /> : <X className="w-4 h-4" />}
+                    </button>
+                    <span className={`text-sm font-bold ${isActive ? 'text-white' : 'text-slate-500'}`}>
+                      {day.label}
+                    </span>
+                  </div>
+
+                  {isActive && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          if (dayPeriods[day.id] > 3) {
+                            setDayPeriods(prev => ({ ...prev, [day.id]: prev[day.id] - 1 }));
+                          }
+                        }}
+                        className="p-1 bg-slate-700 rounded hover:bg-slate-600 text-white text-xs w-6 h-6 flex items-center justify-center"
+                      >
+                        -
+                      </button>
+                      <span className="text-sm font-bold text-blue-400 min-w-[24px] text-center">
+                        {periodCount}
+                      </span>
+                      <button
+                        onClick={() => {
+                          if (dayPeriods[day.id] < 10) {
+                            setDayPeriods(prev => ({ ...prev, [day.id]: prev[day.id] + 1 }));
+                          }
+                        }}
+                        className="p-1 bg-slate-700 rounded hover:bg-slate-600 text-white text-xs w-6 h-6 flex items-center justify-center"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => {
+                  const saveSettings = async () => {
+                    try {
+                      const q = query(collection(db, 'schoolSettings'));
+                      const snapshot = await getDocs(q);
+                      const data = {
+                        schoolDays: schoolDays,
+                        dayPeriods: dayPeriods,
+                        periodLabels: periodLabels,
+                        updatedAt: new Date().toISOString()
+                      };
+                      
+                      if (!snapshot.empty) {
+                        await updateDoc(doc(db, 'schoolSettings', snapshot.docs[0].id), data);
+                      } else {
+                        await addDoc(collection(db, 'schoolSettings'), {
+                          ...data,
+                          createdAt: new Date().toISOString()
+                        });
+                      }
+                      setShowDaySettings(false);
+                      setMessage({ type: 'success', text: '✅ تم حفظ إعدادات أيام الدوام بنجاح!' });
+                      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+                    } catch (error) {
+                      console.error('❌ خطأ في حفظ الإعدادات:', error);
+                      setMessage({ type: 'error', text: '❌ خطأ في حفظ الإعدادات: ' + error.message });
+                    }
+                  };
+                  saveSettings();
+                }}
+                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" /> حفظ الإعدادات
+              </button>
+              <button
+                onClick={() => {
+                  setSchoolDays(DEFAULT_SCHOOL_DAYS);
+                  setDayPeriods(DEFAULT_DAY_PERIODS);
+                }}
+                className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all"
+              >
+                <RefreshCw className="w-4 h-4 inline ml-1" /> إعادة تعيين
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============ عرض واجهة التوزيع المحسنة ============
+  const renderDistribution = () => {
+    const activeDays = getActiveDays();
+    const currentSchedule = generatedSchedule || bestSchedule;
+
+    return (
+      <div className="space-y-6">
+        {/* عرض أيام الدوام وعدد الحصص */}
+        <div className="p-4 bg-slate-900 rounded-xl border border-slate-800">
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-bold text-slate-400 flex items-center gap-2">
+              <CalendarDays className="w-3.5 h-3.5 text-blue-400" />
+              أيام الدوام
+              <span className="text-[9px] text-slate-500 font-normal">
+                ({activeDays.length} أيام)
+              </span>
+            </h4>
+            <button
+              onClick={() => setShowDaySettings(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              تعديل الأيام
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            {activeDays.map(day => (
+              <div key={day.id} className="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                <span className="text-xs text-white">{day.label}</span>
+                <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                  {getDayPeriodCount(day.id)} ح
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* إعدادات التوزيع المحسنة */}
+        <div className="p-4 bg-slate-900 rounded-xl border border-slate-800">
+          <h3 className="text-sm font-bold text-blue-400 mb-4 flex items-center gap-2">
+            <Settings className="w-4 h-4" />
+            إعدادات التوزيع المحسنة
+          </h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">الفصل الدراسي</label>
+              <select
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(Number(e.target.value))}
+                className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value={1}>الفصل الأول</option>
+                <option value={2}>الفصل الثاني</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">العام الدراسي</label>
+              <input
+                type="text"
+                value={academicYear}
+                onChange={(e) => setAcademicYear(e.target.value)}
+                className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+                placeholder="2024/2025"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">مستوى التحسين</label>
+              <select
+                value={optimizationLevel}
+                onChange={(e) => setOptimizationLevel(e.target.value)}
+                className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="fast">⏱️ سريع (حتى 50 محاولة)</option>
+                <option value="balanced">⚖️ متوازن (حتى 100 محاولة)</option>
+                <option value="thorough">🔍 شامل (حتى 200 محاولة)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* إعدادات المحاولات المحسنة */}
+          <div className="mb-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-slate-400">عدد المحاولات:</label>
+                <select
+                  value={maxAttempts}
+                  onChange={(e) => setMaxAttempts(Number(e.target.value))}
+                  className="p-1.5 bg-slate-700 border border-slate-600 rounded text-white text-xs"
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={500}>500</option>
+                  <option value={1000}>1000</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={generateSingleAttemptSchedule}
+                  disabled={processing}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                  <Zap className="w-3.5 h-3.5" />
+                  محاولة واحدة
+                </button>
+                <button
+                  onClick={generateMultiAttemptSchedule}
+                  disabled={processing}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  {processing ? `جاري... ${attemptCount}/${maxAttempts}` : `${maxAttempts} محاولة`}
+                </button>
+                <button
+                  onClick={() => setShowAssistant(true)}
+                  className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1.5"
+                >
+                  <Brain className="w-3.5 h-3.5" />
+                  المساعد الذكي
+                </button>
+              </div>
+              {processing && (
+                <div className="flex-1 min-w-[100px]">
+                  <div className="w-full h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-emerald-500 transition-all duration-300 rounded-full"
+                      style={{ width: `${attemptProgress}%` }}
+                    />
+                  </div>
+                  <div className="text-[8px] text-slate-500 mt-0.5 text-right">
+                    {attemptProgress.toFixed(0)}%
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="mt-2 text-[8px] text-slate-500 flex items-center gap-2">
+              <Info className="w-3 h-3" />
+              كل محاولة تستخدم ترتيباً عشوائياً مختلفاً مع تحسين مستمر للوصول إلى 100%
+            </div>
+          </div>
+
+          {/* تفضيلات المعلمين */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-xs font-bold text-slate-400 flex items-center gap-2">
+                👨‍🏫 إعدادات المعلمين
+                <span className="text-[9px] text-slate-500 font-normal">(مرتب أبجدياً)</span>
+              </h4>
+              <div className="flex items-center gap-2">
+                <label className="text-[10px] text-slate-400">القيود المتقدمة</label>
+                <button
+                  onClick={() => setEnableAdvancedConstraints(!enableAdvancedConstraints)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold transition-all ${
+                    enableAdvancedConstraints 
+                      ? 'bg-emerald-600 text-white' 
+                      : 'bg-slate-700 text-slate-400'
+                  }`}
+                >
+                  {enableAdvancedConstraints ? 'مفعل' : 'معطل'}
+                </button>
+              </div>
+            </div>
+            
+            {renderTeacherPreferences()}
+            
+            <div className="mt-2 p-2 bg-blue-500/10 rounded-lg border border-blue-500/30">
+              <p className="text-[9px] text-blue-400 flex items-center gap-2">
+                <Info className="w-3 h-3" />
+                📌 الأولوية: 1=عالية (يتم توزيع حصصه أولاً)، 2=متوسطة، 3=منخفضة (يتم توزيع حصصه أخيراً)
+              </p>
+            </div>
+          </div>
+
+          {/* عدد حصص المواد */}
+          <div className="mb-4">
+            <h4 className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-2">
+              📚 عدد حصص كل مادة في الأسبوع
+              <span className="text-[9px] text-slate-500 font-normal">(مرتب حسب الصف)</span>
+              <span className="text-[9px] text-emerald-400 font-normal">💾 يُحفظ تلقائياً</span>
+            </h4>
+            {renderSubjectHours()}
+          </div>
+
+          <div className="flex gap-3 flex-wrap">
+            {currentSchedule && (
+              <>
+                <button
+                  onClick={saveSchedule}
+                  disabled={processing}
+                  className="py-2.5 px-6 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" />
+                  حفظ
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm('هل أنت متأكد من إلغاء الجدول الحالي؟')) {
+                      setGeneratedSchedule(null);
+                      setBestSchedule(null);
+                      setConflictList([]);
+                      setBestConflicts([]);
+                      setAllAttempts([]);
+                      setOptimizationStats(null);
+                    }
+                  }}
+                  className="py-2.5 px-6 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-bold transition-all"
+                >
+                  <X className="w-4 h-4 inline" />
+                  إلغاء
+                </button>
+                {bestScore > 0 && (
+                  <span className={`py-2.5 px-4 rounded-lg text-xs font-bold flex items-center gap-1.5 ${
+                    bestScore >= 100 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-500/20 text-emerald-400'
+                  }`}>
+                    <Award className="w-4 h-4" />
+                    أفضل نسبة: {bestScore.toFixed(1)}%
+                    {bestScore >= 100 && ' 🎉 مثالي!'}
+                  </span>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* عرض التعارضات */}
+        {currentSchedule && (
+          <div className="p-4 bg-slate-900 rounded-xl border border-slate-800">
+            <h4 className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              التعارضات والملاحظات
+              {allAttempts.length > 0 && (
+                <button
+                  onClick={() => setShowAttemptHistory(!showAttemptHistory)}
+                  className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                >
+                  {showAttemptHistory ? 'إخفاء السجل' : 'عرض سجل المحاولات'}
+                </button>
+              )}
+            </h4>
+            {renderConflicts()}
+            {showAttemptHistory && renderAttemptHistory()}
+          </div>
+        )}
+
+        {/* عرض الجدول المُنشأ */}
+        {currentSchedule && (
+          <div className={`p-4 bg-slate-900 rounded-xl border border-slate-800 transition-all ${isFullscreen ? 'fixed inset-4 z-50 overflow-auto bg-slate-900' : ''}`}>
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h3 className="text-sm font-bold text-emerald-400 flex items-center gap-2">
+                <Calendar className="w-4 h-4" />
+                الجدول المُنشأ
+                <span className="text-[10px] font-normal text-slate-500">
+                  ({Object.keys(currentSchedule).length} صفوف)
+                  {bestScore > 0 && ` - نسبة الإشغال: ${bestScore.toFixed(1)}%`}
+                  {bestScore >= 100 && ' 🎉 مثالي!'}
+                </span>
+              </h3>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowStats(!showStats)}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    showStats 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Info className="w-3 h-3 inline ml-1" />
+                  إحصائيات
+                </button>
+                <button
+                  onClick={() => setViewType('class')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    viewType === 'class' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <School className="w-3 h-3 inline ml-1" />
+                  حسب الصف
+                </button>
+                <button
+                  onClick={() => setViewType('teacher')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    viewType === 'teacher' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <User className="w-3 h-3 inline ml-1" />
+                  حسب المعلم
+                </button>
+                <button
+                  onClick={() => setShowTeacherConflicts(!showTeacherConflicts)}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                    showTeacherConflicts 
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' 
+                      : 'bg-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <AlertTriangle className="w-3 h-3 inline ml-1" />
+                  التعارضات
+                </button>
+                <button
+                  onClick={() => setIsFullscreen(!isFullscreen)}
+                  className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all"
+                >
+                  {isFullscreen ? <Minimize2 className="w-3 h-3" /> : <Maximize2 className="w-3 h-3" />}
+                </button>
+                <button
+                  onClick={() => window.print()}
+                  className="px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs font-bold transition-all flex items-center gap-1"
+                >
+                  <Printer className="w-3 h-3" />
+                  طباعة
+                </button>
+              </div>
+            </div>
+
+            {/* الإحصائيات */}
+            {showStats && renderStats()}
+
+            {/* فلتر العرض */}
+            {viewType === 'class' ? (
+              <div className="space-y-4">
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    key="all-classes"
+                    onClick={() => setSelectedClassView('')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      !selectedClassView 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    جميع الصفوف
+                  </button>
+                  {getSortedClasses().map(cls => (
+                    <button
+                      key={cls.id}
+                      onClick={() => setSelectedClassView(cls.id)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                        selectedClassView === cls.id 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cls.name}
+                    </button>
+                  ))}
+                </div>
+                {selectedClassView ? (
+                  renderClassSchedule(selectedClassView)
+                ) : (
+                  getSortedClasses().map(cls => renderClassSchedule(cls.id))
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    key="all-teachers"
+                    onClick={() => setSelectedTeacherView('')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                      !selectedTeacherView 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-700 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    جميع المعلمين
+                  </button>
+                  {getSortedTeachers().map(teacher => (
+                    <button
+                      key={teacher.id}
+                      onClick={() => setSelectedTeacherView(teacher.id)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
+                        selectedTeacherView === teacher.id 
+                          ? 'bg-blue-600 text-white' 
+                          : 'bg-slate-700 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {teacher.fullName}
+                    </button>
+                  ))}
+                </div>
+                {selectedTeacherView ? (
+                  renderTeacherSchedule(selectedTeacherView)
+                ) : (
+                  getSortedTeachers().map(teacher => renderTeacherSchedule(teacher.id))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  if (loading || periodsLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+        <p className="text-slate-400 text-sm mr-3">جاري تحميل البيانات...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-slate-800 rounded-2xl p-6 border border-slate-700">
+      {/* المساعد الذكي */}
+      {showAssistant && (
+        <SmartAssistant
+          classes={classes}
+          teachers={teachers}
+          subjects={subjects}
+          subjectHours={subjectHours}
+          teacherMaxHours={teacherMaxHours}
+          teacherMaxDailyHours={teacherMaxDailyHours}
+          teacherPreferences={teacherPreferences}
+          teacherPriority={teacherPriority}
+          schoolDays={schoolDays}
+          dayPeriods={dayPeriods}
+          onClose={() => setShowAssistant(false)}
+          onApplySuggestion={(suggestion) => {
+            setShowAssistant(false);
+            setMessage({
+              type: 'info',
+              text: `✅ تم تطبيق التوصية: ${suggestion.title}`
+            });
+            setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+          }}
+          generatedSchedule={generatedSchedule || bestSchedule}
+        />
+      )}
+
+      {/* نافذة إعدادات الأيام */}
+      {renderDaySettings()}
+
+      {/* العنوان */}
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h2 className="text-lg font-black flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-blue-400" />
+            الجدول الأسبوعي الذكي المحسن
+            <span className="text-[10px] font-normal bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full">
+              v5.0 (100% Optimized)
+            </span>
+          </h2>
+          <p className="text-xs text-slate-400">
+            توزيع الحصص مع خوارزمية محسنة للوصول إلى نسبة 100% وتوازن مثالي
+          </p>
+        </div>
+        <div className="flex items-center gap-3 text-xs">
+          <span className="px-3 py-1 bg-slate-700 rounded-lg">
+            🏫 {classes.length} صف
+          </span>
+          <span className="px-3 py-1 bg-slate-700 rounded-lg">
+            👨‍🏫 {teachers.length} معلم
+          </span>
+          <span className="px-3 py-1 bg-slate-700 rounded-lg">
+            📚 {subjects.length} مادة
+          </span>
+          <span className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-lg">
+            📅 {getActiveDays().length} أيام
+          </span>
+          {bestScore >= 100 && (
+            <span className="px-3 py-1 bg-emerald-500/20 text-emerald-400 rounded-lg flex items-center gap-1">
+              🎉 100%
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* عرض الرسائل */}
+      {message.text && (
+        <div className={`mb-4 p-3 rounded-xl flex items-start gap-2 text-sm ${
+          message.type === 'success' 
+            ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400' 
+            : message.type === 'warning'
+            ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+            : message.type === 'info'
+            ? 'bg-blue-500/10 border border-blue-500/30 text-blue-400'
+            : 'bg-rose-500/10 border border-rose-500/30 text-rose-400'
+        }`}>
+          {message.type === 'success' ? <CheckCircle className="w-5 h-5 flex-shrink-0" /> : 
+           message.type === 'info' ? <Info className="w-5 h-5 flex-shrink-0" /> :
+           <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+          <span>{message.text}</span>
+          {message.type !== 'error' && (
+            <button onClick={() => setMessage({ type: '', text: '' })} className="mr-auto">
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* المحتوى */}
+      {renderDistribution()}
+    </div>
+  );
+}

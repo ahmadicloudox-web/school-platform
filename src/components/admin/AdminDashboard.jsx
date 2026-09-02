@@ -30,7 +30,8 @@ import {
   LogOut,
   Award,
   MessageSquare,
-  ClipboardList
+  ClipboardList,
+  Send
 } from 'lucide-react';
 
 // استيراد المكونات الفرعية
@@ -54,6 +55,7 @@ import BehaviorManager from './BehaviorManager';
 import NotesManager from './NotesManager';
 import GradingConfigManager from './GradesManager/GradingConfigManager';
 import ImportTeachers from './ImportTeachers';
+import AnnouncementSender from './AnnouncementSender';
 export default function AdminDashboard() {
   const { userData, logout } = useAuth();
   
@@ -195,6 +197,7 @@ export default function AdminDashboard() {
       label: '⚙️ الإعدادات',
       tabs: [
         { id: 'permissions', label: 'الصلاحيات', icon: Shield },
+         { id: 'announcement', label: 'إشعار عام', icon: Send },
         { id: 'import', label: 'استيراد طلاب', icon: Upload },
         { id: 'import-teachers', label: 'استيراد معلمين', icon: Upload }, // ✅ إضافة هذه
         { id: 'profile', label: 'معلوماتي', icon: UserCircle },
@@ -267,6 +270,7 @@ export default function AdminDashboard() {
       case 'notes': return <NotesManager />;
       case 'certificates': return <CertificateGenerator />;
       case 'permissions': return <AdminPermissions />;
+      case 'announcement':return <AnnouncementSender darkMode={darkMode} />;
       case 'import': return <ImportStudents />;
       case 'import-teachers': return <ImportTeachers />;
       case 'profile': return <AdminInfo />;
@@ -434,7 +438,7 @@ export default function AdminDashboard() {
 
         {/* المحتوى */}
         <main className="p-4 md:p-6">
-          <div className="max-w-7xl mx-auto">
+          <div className="w-full">  
             {renderContent()}
           </div>
         </main>

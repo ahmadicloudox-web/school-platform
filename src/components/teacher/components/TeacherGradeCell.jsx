@@ -1,7 +1,7 @@
-// src/components/admin/GradesManager/components/GradeCell.jsx
+// src/components/teacher/components/TeacherGradeCell.jsx
 import React, { memo, useState, useEffect } from 'react';
 
-const GradeCell = memo(({ 
+const TeacherGradeCell = memo(({ 
   studentId, 
   field, 
   maxValue, 
@@ -54,7 +54,7 @@ const GradeCell = memo(({
     }
   };
 
-  // ✅ معالج الأحداث المحلي
+  // ✅ معالج الأحداث المحلي للتنقل بالأسهم
   const handleLocalKeyDown = (e) => {
     // منع التمرير عند استخدام الأسهم
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
@@ -65,6 +65,12 @@ const GradeCell = memo(({
   };
 
   const handleLocalBlur = () => {
+    // التحقق من صحة القيمة قبل الحفظ
+    const numValue = Number(editingValue);
+    if (editingValue !== '' && (isNaN(numValue) || numValue < 0 || numValue > maxValue)) {
+      setLocalError(`⚠️ القيمة غير صالحة (0-${maxValue})`);
+      return;
+    }
     if (editingValue !== '') {
       onUpdateTempGrade(studentId, field, editingValue);
     }
@@ -124,6 +130,6 @@ const GradeCell = memo(({
   );
 });
 
-GradeCell.displayName = 'GradeCell';
+TeacherGradeCell.displayName = 'TeacherGradeCell';
 
-export default GradeCell;
+export default TeacherGradeCell;

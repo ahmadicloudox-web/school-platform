@@ -1,9 +1,9 @@
-// src/components/admin/GradesManager/components/GradeTable.jsx
+// src/components/teacher/components/TeacherGradeTable.jsx
 import React, { memo, useMemo } from 'react';
-import { GRADE_FIELDS } from '../constants/gradeFields';
-import GradeRow from './GradeRow';
+import { GRADE_FIELDS } from '../../admin/GradesManager/constants/gradeFields';
+import TeacherGradeRow from './TeacherGradeRow';
 
-const GradeTable = memo(({
+const TeacherGradeTable = memo(({
   students,
   getFieldValue,
   startEdit,
@@ -19,8 +19,9 @@ const GradeTable = memo(({
   selectedSubject,
   selectedClass,
   gradingConfig,
-  dynamicGradeFields,
-  maxTotal
+  getSubjectMaxTotal,
+  getFieldMax,
+  dynamicGradeFields
 }) => {
   if (students.length === 0) {
     return (
@@ -31,21 +32,10 @@ const GradeTable = memo(({
   }
 
   // ✅ استخدام الحقول الديناميكية
-  const fieldsToRender = dynamicGradeFields && dynamicGradeFields.length > 0 
-    ? dynamicGradeFields 
-    : GRADE_FIELDS;
+  const fieldsToRender = dynamicGradeFields || GRADE_FIELDS;
   
-  // ✅ حساب المجموع الكلي من الحقول الديناميكية
-  const calculatedMaxTotal = useMemo(() => {
-    let total = 0;
-    fieldsToRender.forEach(f => {
-      total += (f.max || 0);
-    });
-    return total || maxTotal || 100;
-  }, [fieldsToRender, maxTotal]);
-
-  console.log('📊 GradeTable - الحقول المعروضة:', fieldsToRender);
-  console.log('📊 GradeTable - المجموع الكلي:', calculatedMaxTotal);
+  // ✅ حساب المجموع الكلي
+  const maxTotal = getSubjectMaxTotal();
 
   return (
     <div className="overflow-x-auto">
@@ -63,7 +53,7 @@ const GradeTable = memo(({
             ))}
             <th className="p-3 text-center font-bold text-emerald-400 min-w-[80px]">
               <div>المجموع</div>
-              <div className="text-[9px] text-slate-500">(من {calculatedMaxTotal})</div>
+              <div className="text-[9px] text-slate-500">(من {maxTotal})</div>
             </th>
             <th className="p-3 text-center font-bold text-slate-400 min-w-[80px]">
               التقدير
@@ -72,7 +62,7 @@ const GradeTable = memo(({
         </thead>
         <tbody>
           {students.map((student) => (
-            <GradeRow
+            <TeacherGradeRow
               key={student.id}
               student={student}
               getFieldValue={getFieldValue}
@@ -87,10 +77,10 @@ const GradeTable = memo(({
               isSemesterClosed={isSemesterClosed}
               tempGrades={tempGrades}
               selectedSubject={selectedSubject}
-              selectedClass={selectedClass}
               gradingConfig={gradingConfig}
+              getSubjectMaxTotal={getSubjectMaxTotal}
+              getFieldMax={getFieldMax}
               dynamicGradeFields={fieldsToRender}
-              maxTotal={calculatedMaxTotal}
             />
           ))}
         </tbody>
@@ -99,6 +89,6 @@ const GradeTable = memo(({
   );
 });
 
-GradeTable.displayName = 'GradeTable';
+TeacherGradeTable.displayName = 'TeacherGradeTable';
 
-export default GradeTable;
+export default TeacherGradeTable;

@@ -1,8 +1,8 @@
-// src/components/admin/GradesManager/components/GradeFilters.jsx
-import React, { memo, useMemo } from 'react';
-import { Search, Calendar } from 'lucide-react';
+// src/components/teacher/components/TeacherGradeFilters.jsx
+import React, { memo } from 'react';
+import { Search, Calendar, Users, BookOpen, AlertCircle } from 'lucide-react';
 
-const GradeFilters = memo(({
+const TeacherGradeFilters = memo(({
   selectedClass,
   setSelectedClass,
   selectedSubject,
@@ -14,25 +14,17 @@ const GradeFilters = memo(({
   setSearchQuery,
   classes,
   subjects,
-  isYearActive,
-  isYearClosed,
-  gradingConfig,
-  selectedClassId
+  isSemesterClosed
 }) => {
-  // ✅ فلترة المواد حسب الصف المختار
-  const filteredSubjects = useMemo(() => {
-    if (!selectedClass) return subjects;
-    return subjects.filter(subject => subject.classId === selectedClass);
-  }, [subjects, selectedClass]);
-
-  // ✅ عدد المواد المتاحة
-  const subjectsCount = filteredSubjects.length;
+  const hasClasses = classes.length > 0;
+  const hasSubjects = subjects.length > 0;
 
   return (
     <div className="flex flex-wrap gap-3 mb-6 p-4 bg-slate-900 rounded-xl border border-slate-800">
-      {/* ====== اختيار الصف ====== */}
       <div className="flex-1 min-w-[150px]">
-        <label className="block text-xs text-slate-400 mb-1">الصف</label>
+        <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+          <Users className="w-3 h-3" /> الصف
+        </label>
         <select
           value={selectedClass}
           onChange={(e) => {
@@ -40,50 +32,48 @@ const GradeFilters = memo(({
             setSelectedSubject('');
           }}
           className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          disabled={!hasClasses}
         >
-          <option value="">جميع الصفوف</option>
+          <option value="">{hasClasses ? 'اختر الصف' : 'لا توجد صفوف'}</option>
           {classes.map(cls => (
             <option key={cls.id} value={cls.id}>{cls.name}</option>
           ))}
         </select>
-        {selectedClass && (
-          <p className="text-[9px] text-slate-500 mt-1">
-            📚 {subjectsCount} مادة متاحة
+        {!hasClasses && (
+          <p className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            لم يتم تخصيص صفوف لك
           </p>
         )}
       </div>
 
-      {/* ====== اختيار المادة ====== */}
       <div className="flex-1 min-w-[150px]">
-        <label className="block text-xs text-slate-400 mb-1">المادة *</label>
+        <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+          <BookOpen className="w-3 h-3" /> المادة *
+        </label>
         <select
           value={selectedSubject}
           onChange={(e) => setSelectedSubject(e.target.value)}
           className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
+          disabled={!selectedClass || !hasSubjects}
         >
-          <option value="">{selectedClass ? 'اختر مادة' : 'اختر صف أولاً'}</option>
-          {filteredSubjects.map(sub => {
-            // ✅ التحقق من وجود توزيع مخصص للمادة
-            const hasCustomConfig = gradingConfig?.subjects?.[sub.id] || 
-                                   (selectedClassId && gradingConfig?.subjects?.[`${sub.id}_${selectedClassId}`]);
-            return (
-              <option key={sub.id} value={sub.id}>
-                {sub.name} {hasCustomConfig ? '🔧' : ''}
-              </option>
-            );
-          })}
+          <option value="">{selectedClass ? (hasSubjects ? 'اختر مادة' : 'لا توجد مواد') : 'اختر صف أولاً'}</option>
+          {subjects.map(sub => (
+            <option key={sub.id} value={sub.id}>{sub.name}</option>
+          ))}
         </select>
-        {selectedClass && filteredSubjects.length === 0 && (
-          <p className="text-[10px] text-amber-400 mt-1">⚠️ لا توجد مواد لهذا الصف</p>
-        )}
-        {selectedClass && filteredSubjects.length > 0 && !selectedSubject && (
-          <p className="text-[10px] text-blue-400 mt-1">📚 اختر مادة لعرض العلامات</p>
+        {selectedClass && !hasSubjects && (
+          <p className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
+            <AlertCircle className="w-3 h-3" />
+            لا توجد مواد في هذا الصف
+          </p>
         )}
       </div>
 
-      {/* ====== الفصل الدراسي ====== */}
       <div className="min-w-[120px]">
-        <label className="block text-xs text-slate-400 mb-1">الفصل</label>
+        <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+          <Calendar className="w-3 h-3" /> الفصل
+        </label>
         <select
           value={selectedSemester}
           onChange={(e) => setSelectedSemester(Number(e.target.value))}
@@ -94,34 +84,24 @@ const GradeFilters = memo(({
         </select>
       </div>
 
-      {/* ====== العام الدراسي ====== */}
       <div className="min-w-[150px]">
         <label className="block text-xs text-slate-400 mb-1">العام الدراسي</label>
         <div className="relative">
           <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            value={academicYear}
+            value={academicYear || 'غير محدد'}
             disabled
             className="w-full p-2.5 pr-10 bg-slate-700 border border-slate-600 rounded-lg text-white text-sm cursor-not-allowed opacity-70"
           />
-          {isYearActive && (
-            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[8px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded">
-              نشط
-            </span>
-          )}
-          {isYearClosed && (
-            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[8px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded">
-              مغلق
-            </span>
-          )}
         </div>
         <p className="text-[9px] text-slate-500 mt-1">🔒 مثبت للعام الحالي</p>
       </div>
 
-      {/* ====== بحث ====== */}
       <div className="flex-1 min-w-[150px]">
-        <label className="block text-xs text-slate-400 mb-1">بحث</label>
+        <label className="block text-xs text-slate-400 mb-1 flex items-center gap-1">
+          <Search className="w-3 h-3" /> بحث
+        </label>
         <div className="relative">
           <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
@@ -134,10 +114,16 @@ const GradeFilters = memo(({
           />
         </div>
       </div>
+
+      {isSemesterClosed && (
+        <div className="w-full text-center text-rose-400 text-xs bg-rose-500/10 p-2 rounded-lg border border-rose-500/30">
+          ⚠️ الفصل الدراسي مغلق من قبل الإدارة - لا يمكن التعديل
+        </div>
+      )}
     </div>
   );
 });
 
-GradeFilters.displayName = 'GradeFilters';
+TeacherGradeFilters.displayName = 'TeacherGradeFilters';
 
-export default GradeFilters;
+export default TeacherGradeFilters;

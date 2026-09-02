@@ -9,9 +9,9 @@ import { ProtectedRoute } from './components/common';
 //import Login from './pages/Login';
 import Login from './components/auth/Login';
 import AdminDashboard from './components/admin/AdminDashboard';
-import TeacherDashboard from './pages/TeacherDashboard';
+//import TeacherDashboard from './pages/TeacherDashboard';
 import StudentDashboard from './pages/StudentDashboard';
-
+import TeacherDashboard from './components/teacher/TeacherDashboard';
 // ============ ✅ مكون التوجيه حسب الدور (محسّن) ============
 const DashboardRouter = () => {
   const { userData, loading, role, refreshUserData, isAuthenticated } = useAuth();

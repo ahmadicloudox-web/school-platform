@@ -1,6 +1,6 @@
 // src/components/admin/GradesManager/utils/printUtils.js
-
 import { calculateTotal, getGrade, getTotalMaxForSubject } from './gradeCalculations';
+import { getGradeFieldsForSubject } from '../constants/gradeFields';
 
 export const printGradeSheet = (
   classData, 
@@ -9,15 +9,29 @@ export const printGradeSheet = (
   subjectData, 
   semesterData, 
   academicYearData,
-  gradingConfig  // ✅ جديد
+  classId,
+  gradingConfig
 ) => {
   const printWindow = window.open('', '_blank', 'width=1000,height=800');
   if (!printWindow) return;
   
-  // ✅ الحصول على المجموع الكلي للمادة
   const subjectId = subjectData?.id;
-  const maxTotal = getTotalMaxForSubject(subjectId, gradingConfig);
   
+  // ✅ 1. الحصول على الحقول الديناميكية من قاعدة البيانات
+  const dynamicFields = getGradeFieldsForSubject(subjectId, classId, gradingConfig);
+  
+  // ✅ 2. حساب المجموع الكلي الصحيح
+  const maxTotal = getTotalMaxForSubject(subjectId, classId, gradingConfig);
+  
+  // ✅ 3. بناء ترويسة الجدول (الأعمدة) ديناميكياً
+  const headerColumns = dynamicFields.map(field => 
+    `<th style="padding: 8px; border: 1px solid #1a237e; text-align: center;">
+      ${field.label}<br>
+      <span style="font-size:10px;font-weight:normal;">(${field.max || 0})</span>
+    </th>`
+  ).join('');
+
+  // ✅ 4. بناء صفوف البيانات
   const rows = studentsData.map(student => {
     const grade = gradesData.find(g => 
       g.studentId === student.id && 
@@ -26,27 +40,26 @@ export const printGradeSheet = (
       g.academicYear === academicYearData
     );
     
-    const fields = {
-      dailyExam1: grade?.dailyExam1 || 0,
-      participation1: grade?.participation1 || 0,
-      midtermExam: grade?.midtermExam || 0,
-      dailyExam2: grade?.dailyExam2 || 0,
-      participation2: grade?.participation2 || 0,
-      finalExam: grade?.finalExam || 0
-    };
+    // تجميع القيم من قاعدة البيانات
+    const fields = {};
+    dynamicFields.forEach(f => {
+      fields[f.key] = grade?.[f.key] || 0;
+    });
+
+    // حساب المجموع والنسبة المئوية
     const total = calculateTotal(fields, subjectId, gradingConfig);
     const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
     const gradeInfo = getGrade(percentage);
     
+    // بناء خلايا الطالب
+    const fieldCells = dynamicFields.map(f => 
+      `<td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields[f.key] || 0}</td>`
+    ).join('');
+
     return `
       <tr>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${student.fullName}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.dailyExam1}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.participation1}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.midtermExam}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.dailyExam2}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.participation2}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${fields.finalExam}</td>
+        ${fieldCells}
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #2e7d32;">${total} / ${maxTotal}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">
           <span style="padding: 2px 8px; border-radius: 12px; background: ${percentage >= 90 ? '#e8f5e9' : percentage >= 80 ? '#e3f2fd' : percentage >= 70 ? '#fff3e0' : percentage >= 60 ? '#fff8e1' : '#ffebee'}; color: ${percentage >= 90 ? '#2e7d32' : percentage >= 80 ? '#1565c0' : percentage >= 70 ? '#e65100' : percentage >= 60 ? '#f57f17' : '#c62828'};">
@@ -103,15 +116,10 @@ export const printGradeSheet = (
           <table>
             <thead>
               <tr>
-                <th>اسم الطالب</th>
-                <th>امتحان يومي 1<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>مشاركة 1<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>امتحان شهري<br><span style="font-size:10px;font-weight:normal;">(20)</span></th>
-                <th>امتحان يومي 2<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>مشاركة 2<br><span style="font-size:10px;font-weight:normal;">(10)</span></th>
-                <th>امتحان فصلي<br><span style="font-size:10px;font-weight:normal;">(40)</span></th>
-                <th>المجموع<br><span style="font-size:10px;font-weight:normal;">(${maxTotal})</span></th>
-                <th>التقدير</th>
+                <th style="padding: 8px; border: 1px solid #1a237e; text-align: center;">اسم الطالب</th>
+                ${headerColumns}
+                <th style="padding: 8px; border: 1px solid #1a237e; text-align: center;">المجموع<br><span style="font-size:10px;font-weight:normal;">(${maxTotal})</span></th>
+                <th style="padding: 8px; border: 1px solid #1a237e; text-align: center;">التقدير</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>

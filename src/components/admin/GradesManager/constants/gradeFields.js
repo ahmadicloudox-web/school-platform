@@ -49,51 +49,89 @@ export const DEFAULT_GRADING_CONFIG = {
   total: 100
 };
 
-// ============ ✅ دوال مساعدة ديناميكية ============
+// ============ دوال مساعدة ديناميكية ============
 
 // ✅ الحصول على إعدادات المادة مع مراعاة الصف
 export const getGradeFieldsForSubject = (subjectId, classId, gradingConfig) => {
+  console.log('🔍 getGradeFieldsForSubject - subjectId:', subjectId, 'classId:', classId);
+  
+  // إذا لم يوجد subjectId أو gradingConfig، استخدم الافتراضي
   if (!subjectId || !gradingConfig) {
-    return GRADE_FIELD_KEYS.map(key => ({
-      key,
-      label: GRADE_FIELD_LABELS[key] || key,
-      max: DEFAULT_GRADING_CONFIG[key] || 0,
-      color: GRADE_FIELD_COLORS[key] || 'slate-400'
-    }));
+    console.log('⚠️ استخدام الحقول الافتراضية (لا يوجد subjectId أو gradingConfig)');
+    return GRADE_FIELDS.map(f => ({ ...f }));
   }
 
   // ✅ محاولة الحصول على توزيع للمادة + الصف أولاً
   const configKey = classId ? `${subjectId}_${classId}` : subjectId;
-  const config = gradingConfig.subjects?.[configKey] || 
-                 gradingConfig.subjects?.[subjectId] || 
-                 gradingConfig.default || 
-                 DEFAULT_GRADING_CONFIG;
+  console.log('🔑 configKey:', configKey);
+  console.log('📦 gradingConfig.subjects:', gradingConfig.subjects);
   
-  return GRADE_FIELD_KEYS.map(key => ({
+  // البحث عن التوزيع بالترتيب: مادة+صف > مادة فقط > افتراضي
+  let config = gradingConfig.subjects?.[configKey];
+  if (!config) {
+    config = gradingConfig.subjects?.[subjectId];
+  }
+  if (!config) {
+    config = gradingConfig.default;
+  }
+  if (!config) {
+    config = DEFAULT_GRADING_CONFIG;
+  }
+  
+  console.log('📋 التوزيع المستخدم:', config);
+  
+  // بناء الحقول من التوزيع
+  const result = GRADE_FIELD_KEYS.map(key => ({
     key,
     label: GRADE_FIELD_LABELS[key] || key,
     max: config[key] || 0,
     color: GRADE_FIELD_COLORS[key] || 'slate-400'
   }));
+  
+  console.log('✅ الحقول الناتجة:', result);
+  return result;
 };
 
 // ✅ الحصول على المجموع الكلي للمادة مع مراعاة الصف
 export const getTotalMaxForSubject = (subjectId, classId, gradingConfig) => {
+  console.log('🔍 getTotalMaxForSubject - subjectId:', subjectId, 'classId:', classId);
+  
   if (!subjectId || !gradingConfig) {
+    console.log('⚠️ استخدام المجموع الافتراضي');
     return DEFAULT_GRADING_CONFIG.total || 100;
   }
   
   const configKey = classId ? `${subjectId}_${classId}` : subjectId;
-  const config = gradingConfig.subjects?.[configKey] || 
-                 gradingConfig.subjects?.[subjectId] || 
-                 gradingConfig.default || 
-                 DEFAULT_GRADING_CONFIG;
-  return config.total || 100;
+  
+  let config = gradingConfig.subjects?.[configKey];
+  if (!config) {
+    config = gradingConfig.subjects?.[subjectId];
+  }
+  if (!config) {
+    config = gradingConfig.default;
+  }
+  if (!config) {
+    config = DEFAULT_GRADING_CONFIG;
+  }
+  
+  const total = config.total || 100;
+  console.log('📋 المجموع الكلي المستخدم:', total);
+  return total;
 };
 
 // ✅ حساب المجموع من القيم
 export const calculateTotalFromFields = (fields, subjectId, classId, gradingConfig) => {
-  const config = gradingConfig?.subjects?.[subjectId] || gradingConfig?.default || DEFAULT_GRADING_CONFIG;
+  const configKey = classId ? `${subjectId}_${classId}` : subjectId;
+  let config = gradingConfig?.subjects?.[configKey];
+  if (!config) {
+    config = gradingConfig?.subjects?.[subjectId];
+  }
+  if (!config) {
+    config = gradingConfig?.default;
+  }
+  if (!config) {
+    config = DEFAULT_GRADING_CONFIG;
+  }
   
   let total = 0;
   GRADE_FIELD_KEYS.forEach(key => {

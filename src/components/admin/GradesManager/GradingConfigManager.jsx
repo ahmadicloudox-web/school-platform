@@ -1,6 +1,6 @@
 // src/components/admin/GradingConfigManager.jsx
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { db } from '../../../services/firebase';
 import { 
   collection, doc, getDocs, getDoc, updateDoc, 
@@ -24,8 +24,14 @@ export default function GradingConfigManager() {
   
   const [gradingConfig, setGradingConfig] = useState({
     default: { ...DEFAULT_GRADING_CONFIG },
-    subjects: {} // ✅ المفتاح: "subjectId_classId" أو "subjectId" للتوزيع العام
+    subjects: {}
   });
+
+  // ============ ✅ فلترة المواد حسب الصف ============
+  const filteredSubjects = useMemo(() => {
+    if (!selectedClass) return subjects;
+    return subjects.filter(subject => subject.classId === selectedClass);
+  }, [subjects, selectedClass]);
 
   // ============ جلب البيانات ============
   useEffect(() => {
@@ -95,7 +101,6 @@ export default function GradingConfigManager() {
   // ============ تحديث قيمة حقل ============
   const updateFieldValue = (fieldKey, value) => {
     if (!selectedSubject) {
-      // ✅ تحديث التوزيع الافتراضي
       const numValue = Number(value);
       if (isNaN(numValue) || numValue < 0) return;
 
@@ -109,7 +114,6 @@ export default function GradingConfigManager() {
       return;
     }
 
-    // ✅ تحديث توزيع المادة (مع الصف إذا تم اختياره)
     const configKey = getConfigKey(selectedSubject, selectedClass);
     const numValue = Number(value);
     if (isNaN(numValue) || numValue < 0) return;
@@ -234,7 +238,10 @@ export default function GradingConfigManager() {
           <label className="block text-xs text-slate-400 mb-1">اختر الصف</label>
           <select
             value={selectedClass}
-            onChange={(e) => setSelectedClass(e.target.value)}
+            onChange={(e) => {
+              setSelectedClass(e.target.value);
+              setSelectedSubject('');
+            }}
             className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
           >
             <option value="">جميع الصفوف</option>
@@ -252,8 +259,7 @@ export default function GradingConfigManager() {
             className="w-full p-2.5 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-blue-500"
           >
             <option value="">التوزيع الافتراضي (جميع المواد)</option>
-            {subjects.map(sub => {
-              // التحقق من وجود توزيع مخصص لهذه المادة (مع أو بدون صف)
+            {filteredSubjects.map(sub => {
               const hasSubjectConfig = Object.keys(gradingConfig.subjects).some(key => 
                 key === sub.id || key.startsWith(`${sub.id}_`)
               );
@@ -264,6 +270,9 @@ export default function GradingConfigManager() {
               );
             })}
           </select>
+          {selectedClass && filteredSubjects.length === 0 && (
+            <p className="text-[10px] text-amber-400 mt-1">⚠️ لا توجد مواد لهذا الصف</p>
+          )}
         </div>
 
         {selectedSubject && (
@@ -346,7 +355,6 @@ export default function GradingConfigManager() {
             })}
           </div>
 
-          {/* ✅ عرض المجموع الكلي */}
           <div className="mt-4 p-3 bg-slate-800/50 rounded-lg border border-slate-700">
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-400">المجموع الكلي:</span>

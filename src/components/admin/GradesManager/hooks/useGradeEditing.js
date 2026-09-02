@@ -1,5 +1,4 @@
 // src/components/admin/GradesManager/hooks/useGradeEditing.js
-
 import { useState, useCallback, useRef } from 'react';
 import { db } from '../../../../services/firebase';
 import { 
@@ -12,7 +11,7 @@ import {
   getTotalMaxForSubject,
   calculateTotalFromFields
 } from '../constants/gradeFields';
-import { calculateTotal, getGrade } from '../utils/gradeCalculations';
+import { getGrade } from '../utils/gradeCalculations';
 
 export const useGradeEditing = (
   grades,
@@ -23,8 +22,10 @@ export const useGradeEditing = (
   academicYear,
   notifyTeacher,
   setMessage,
-  gradingConfig
+  gradingConfig,
+  selectedClass
 ) => {
+  // ====== الحالات ======
   const [tempGrades, setTempGrades] = useState({});
   const [editingCell, setEditingCell] = useState(null);
   const [editingValue, setEditingValue] = useState('');
@@ -33,13 +34,13 @@ export const useGradeEditing = (
 
   // ============ الحصول على الحقول الديناميكية ============
   const getFieldsForSubject = useCallback((subjectId) => {
-    return getGradeFieldsForSubject(subjectId, gradingConfig);
-  }, [gradingConfig]);
+    return getGradeFieldsForSubject(subjectId, selectedClass, gradingConfig);
+  }, [gradingConfig, selectedClass]);
 
   // ============ الحصول على المجموع الكلي ============
   const getMaxTotal = useCallback((subjectId) => {
-    return getTotalMaxForSubject(subjectId, gradingConfig);
-  }, [gradingConfig]);
+    return getTotalMaxForSubject(subjectId, selectedClass, gradingConfig);
+  }, [gradingConfig, selectedClass]);
 
   // ============ الحصول على قيمة الحقل ============
   const getFieldValue = useCallback((studentId, field) => {
@@ -49,10 +50,11 @@ export const useGradeEditing = (
     const grade = grades.find(g => 
       g.studentId === studentId && 
       g.subjectId === selectedSubject && 
-      g.semester === selectedSemester
+      g.semester === selectedSemester &&
+      g.academicYear === academicYear
     );
     return grade?.[field] || 0;
-  }, [grades, selectedSubject, selectedSemester, tempGrades]);
+  }, [grades, selectedSubject, selectedSemester, academicYear, tempGrades]);
 
   // ============ بدء التعديل ============
   const startEdit = useCallback((studentId, field, currentValue, isSemesterClosed) => {
@@ -154,7 +156,6 @@ export const useGradeEditing = (
     try {
       const batch = writeBatch(db);
       let savedCount = 0;
-      let errorCount = 0;
       const notifications = [];
 
       for (const key of validChanges) {
@@ -181,7 +182,12 @@ export const useGradeEditing = (
           const oldValue = oldData[fieldKey] || 0;
           
           const updatedFields = { ...oldData, [fieldKey]: value };
-          const total = calculateTotalFromFields(updatedFields, selectedSubject, gradingConfig);
+          
+          let total = 0;
+          GRADE_FIELD_KEYS.forEach(f => {
+            total += (updatedFields[f] || 0);
+          });
+          
           const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
           const grade = getGrade(percentage);
           
@@ -210,29 +216,26 @@ export const useGradeEditing = (
           }
           savedCount++;
         } else {
-          const total = value;
-          const percentage = maxTotal > 0 ? (value / maxTotal) * 100 : 0;
-          const grade = getGrade(percentage);
-          
           const gradeData = {
             studentId: studentId,
             subjectId: selectedSubject,
             semester: selectedSemester,
             academicYear: academicYear,
-            [fieldKey]: value,
             dailyExam1: 0,
             participation1: 0,
             midtermExam: 0,
             dailyExam2: 0,
             participation2: 0,
             finalExam: 0,
+            [fieldKey]: value,
             total: value,
             maxTotal: maxTotal,
-            percentage: percentage,
-            grade: grade.key,
+            percentage: maxTotal > 0 ? (value / maxTotal) * 100 : 0,
+            grade: 'F',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            createdBy: 'admin'
+            createdBy: 'admin',
+            updatedBy: 'admin'
           };
           
           const newDocRef = doc(collection(db, 'grades'));
@@ -256,9 +259,6 @@ export const useGradeEditing = (
       setEditingValue('');
 
       let successMessage = `✅ تم حفظ ${savedCount} علامة بنجاح في الفصل ${selectedSemester === 1 ? 'الأول' : 'الثاني'}`;
-      if (errorCount > 0) {
-        successMessage += `، فشل ${errorCount} علامة`;
-      }
       successMessage += ` (المجموع الكلي: ${maxTotal} علامة)`;
       setMessage({ type: 'success', text: successMessage });
       setTimeout(() => setMessage({ type: '', text: '' }), 3000);
@@ -280,7 +280,8 @@ export const useGradeEditing = (
     setMessage,
     getFieldsForSubject,
     getMaxTotal,
-    gradingConfig
+    gradingConfig,
+    selectedClass
   ]);
 
   const getTotalChanges = useCallback(() => {
@@ -297,9 +298,12 @@ export const useGradeEditing = (
     return getMaxTotal(selectedSubject);
   }, [selectedSubject, getMaxTotal]);
 
+  // ✅ إرجاع جميع القيم المطلوبة
   return {
     tempGrades,
+    setTempGrades,
     editingCell,
+    setEditingCell,
     editingValue,
     setEditingValue,
     saving,

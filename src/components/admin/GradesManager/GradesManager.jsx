@@ -1,5 +1,4 @@
 // src/components/admin/GradesManager.jsx
-
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, auth } from '../../../services/firebase';
 import { 
@@ -28,9 +27,16 @@ import { useGradeEditing } from './hooks/useGradeEditing';
 
 // ====== دوال مساعدة ======
 import { printGradeSheet } from './utils/printUtils';
-import { GRADE_FIELDS, getTotalMaxForSubject } from './constants/gradeFields';
-
+import { GRADE_FIELDS, getTotalMaxForSubject, getGradeFieldsForSubject } from './constants/gradeFields';
+import { 
+  notifySemesterClosed, 
+  notifySemesterOpened, 
+  notifyYearStarted, 
+  notifyYearClosed 
+} from '../../../services/notificationService';
+import { useAuth } from '../../../hooks/useAuth';
 export default function GradesManager() {
+  const { userData } = useAuth();
   // ====== البيانات الأساسية ======
   const [grades, setGrades] = useState([]);
   const [students, setStudents] = useState([]);
@@ -52,12 +58,12 @@ export default function GradesManager() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
 
-  // ====== ✅ توزيع العلامات ======
+  // ====== توزيع العلامات ======
   const [gradingConfig, setGradingConfig] = useState(null);
 
   // ====== استخدام Hooks ======
   const {
-    schoolSettings,
+    currentYearDoc, // ✅ تم التحديث لاستخدام currentYearDoc بدلاً من schoolSettings
     settingsLoading,
     academicYear,
     setAcademicYear,
@@ -71,9 +77,26 @@ export default function GradesManager() {
     closeAcademicYear
   } = useSchoolSettings();
 
+  // ✅ استقبال جميع القيم من useGradeEditing
+  const gradeEditing = useGradeEditing(
+    grades,
+    students,
+    subjects,
+    selectedSubject,
+    selectedSemester,
+    academicYear,
+    notifyTeacher,
+    setMessage,
+    gradingConfig,
+    selectedClass
+  );
+
+  // ✅ استخراج القيم من gradeEditing
   const {
     tempGrades,
+    setTempGrades,
     editingCell,
+    setEditingCell,
     editingValue,
     setEditingValue,
     saving,
@@ -85,35 +108,27 @@ export default function GradesManager() {
     getTotalChanges,
     clearChanges,
     getSubjectMaxTotal
-  } = useGradeEditing(
-    grades,
-    students,
-    subjects,
-    selectedSubject,
-    selectedSemester,
-    academicYear,
-    notifyTeacher,
-    setMessage,
-    gradingConfig
-  );
+  } = gradeEditing;
 
-  // ====== ✅ جلب توزيع العلامات ======
+  // ====== جلب توزيع العلامات مع الاستماع للتغييرات ======
   useEffect(() => {
-    const fetchGradingConfig = async () => {
-      try {
-        const settingsDoc = await getDoc(doc(db, 'schoolSettings', 'settings'));
-        if (settingsDoc.exists()) {
-          const data = settingsDoc.data();
+    const unsubscribeSettings = onSnapshot(
+      doc(db, 'schoolSettings', 'settings'),
+      (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
           if (data.gradingConfig) {
+            console.log('✅ تم تحديث توزيع العلامات:', data.gradingConfig);
             setGradingConfig(data.gradingConfig);
-            console.log('✅ تم جلب توزيع العلامات:', data.gradingConfig);
           }
         }
-      } catch (error) {
-        console.error('❌ خطأ في جلب توزيع العلامات:', error);
+      },
+      (error) => {
+        console.error('❌ خطأ في الاستماع لتوزيع العلامات:', error);
       }
-    };
-    fetchGradingConfig();
+    );
+
+    return () => unsubscribeSettings();
   }, []);
 
   // ====== جلب البيانات ======
@@ -162,6 +177,35 @@ export default function GradesManager() {
     };
   }, []);
 
+  // ====== فلترة المواد حسب الصف ======
+  const filteredSubjects = useMemo(() => {
+    if (!selectedClass) return subjects;
+    return subjects.filter(subject => subject.classId === selectedClass);
+  }, [subjects, selectedClass]);
+
+  // ====== الحصول على الحقول الديناميكية للمادة المحددة ======
+  const dynamicGradeFields = useMemo(() => {
+    console.log('🔄 حساب dynamicGradeFields - selectedSubject:', selectedSubject, 'selectedClass:', selectedClass);
+    
+    if (!selectedSubject || !gradingConfig) {
+      console.log('⚠️ استخدام GRADE_FIELDS الافتراضية');
+      return GRADE_FIELDS.map(f => ({ ...f }));
+    }
+    
+    const classId = selectedClass || null;
+    const fields = getGradeFieldsForSubject(selectedSubject, classId, gradingConfig);
+    
+    console.log('📊 الحقول الديناميكية الناتجة:', fields);
+    return fields;
+  }, [selectedSubject, selectedClass, gradingConfig]);
+
+  // ====== الحصول على المجموع الكلي للمادة مع مراعاة الصف ======
+  const currentMaxTotal = useMemo(() => {
+    if (!selectedSubject) return 100;
+    const classId = selectedClass || null;
+    return getTotalMaxForSubject(selectedSubject, classId, gradingConfig);
+  }, [selectedSubject, selectedClass, gradingConfig]);
+
   // ====== فلترة وترتيب الطلاب ======
   const filteredStudents = useMemo(() => {
     return students.filter(student => {
@@ -171,11 +215,37 @@ export default function GradesManager() {
     });
   }, [students, selectedClass, searchQuery]);
 
-  const sortedStudents = useMemo(() => {
-    return [...filteredStudents].sort((a, b) => 
-      a.fullName.localeCompare(b.fullName)
-    );
-  }, [filteredStudents]);
+   const sortedStudents = useMemo(() => {
+  return [...filteredStudents].sort((a, b) => {
+    // دالة مساعدة لتنظيف الاسم مع الحماية من القيم الفارغة
+    const cleanName = (name) => {
+      if (!name) return ''; // ✅ إذا كان الاسم فارغاً، إرجاع نص فارغ لتجنب الخطأ
+      return name.replace(/^(ال|أل|آل|إل)/, '').trim();
+    };
+    
+    const nameA = cleanName(a.fullName);
+    const nameB = cleanName(b.fullName);
+    
+    // استخدام 'ar' لضمان الترتيب الأبجدي العربي الصحيح
+    return nameA.localeCompare(nameB, 'ar', { sensitivity: 'base' });
+  });
+}, [filteredStudents]);
+ // ✅ ترتيب الصفوف أبجدياً بشكل صحيح
+  const sortedClasses = useMemo(() => {
+    return [...classes].sort((a, b) => {
+      const nameA = a.name || '';
+      const nameB = b.name || '';
+      return nameA.localeCompare(nameB, 'ar', { sensitivity: 'base' });
+    });
+  }, [classes]);
+  // ✅ ترتيب المواد أبجدياً بشكل صحيح
+  const sortedSubjects = useMemo(() => {
+    return [...filteredSubjects].sort((a, b) => {
+      const nameA = a.name || '';
+      const nameB = b.name || '';
+      return nameA.localeCompare(nameB, 'ar', { sensitivity: 'base' });
+    });
+  }, [filteredSubjects]);
 
   // ====== دوال مساعدة ======
   const getClassName = useCallback((classId) => {
@@ -187,12 +257,6 @@ export default function GradesManager() {
     const subject = subjects.find(s => s.id === id);
     return subject?.name || 'غير محدد';
   }, [subjects]);
-
-  // ====== ✅ الحصول على المجموع الكلي للمادة مع مراعاة الصف ======
-  const currentMaxTotal = useMemo(() => {
-    const classId = selectedClass || null;
-    return getTotalMaxForSubject(selectedSubject, classId, gradingConfig);
-  }, [selectedSubject, selectedClass, gradingConfig]);
 
   // ====== معالج لوحة المفاتيح ======
   const handleKeyDown = useCallback((e, studentId, field) => {
@@ -209,6 +273,11 @@ export default function GradesManager() {
     if (isSemesterClosed) {
       setMessage({ type: 'error', text: '⚠️ الفصل الدراسي مغلق' });
       return;
+    }
+
+    // منع التمرير عند استخدام الأسهم
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+      e.preventDefault();
     }
 
     switch (e.key) {
@@ -345,42 +414,88 @@ export default function GradesManager() {
       subjectData,
       selectedSemester,
       academicYear,
-      selectedClass,  // ✅ تمرير classId
+      selectedClass,
       gradingConfig
     );
   }, [selectedSubject, selectedClass, classes, subjects, students, grades, selectedSemester, academicYear, gradingConfig]);
 
-  // ====== معالجات النوافذ المنبثقة ======
+  // ====== معالجات النوافذ المنبثقة (مع التعديل ليتوافق مع المجموعة الجديدة) ======
   const handleStartYear = useCallback(async (year, password) => {
+  try {
+    // 1. بدء العام الدراسي
     await startAcademicYear(year, password);
     setShowYearModal(false);
     setMessage({ type: 'success', text: `✅ تم بدء العام الدراسي ${year} بنجاح!` });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-  }, [startAcademicYear]);
+    
+    // 2. ✅ إرسال إشعار لجميع المعلمين ببدء العام الدراسي
+    try {
+      await notifyYearStarted(year, userData?.fullName || 'الإدارة');
+      console.log(`✅ تم إرسال إشعار بدء العام ${year} لجميع المعلمين`);
+    } catch (notifyError) {
+      console.error('❌ خطأ في إرسال الإشعار:', notifyError);
+    }
+    
+  } catch (error) {
+    setMessage({ type: 'error', text: error.message });
+  }
+}, [startAcademicYear, userData]);
 
   const handleOpenSemester = useCallback(async (semester, password) => {
-    await openSemester(semester, password);
-    setShowConfirmModal(false);
-    setConfirmAction(null);
-    setMessage({ type: 'success', text: `✅ تم فتح الفصل ${semester === 1 ? 'الأول' : 'الثاني'} بنجاح!` });
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-  }, [openSemester]);
+    try {
+      await openSemester(semester, password);
+      setShowConfirmModal(false);
+      setConfirmAction(null);
+      setMessage({ type: 'success', text: `✅ تم فتح الفصل ${semester === 1 ? 'الأول' : 'الثاني'} بنجاح!` });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+       try {
+    await notifySemesterOpened(semester, academicYear, userData?.fullName || 'الإدارة');
+    console.log(`✅ تم إرسال إشعار فتح الفصل ${semester} لجميع المعلمين`);
+  } catch (error) {
+    console.error('❌ خطأ في إرسال الإشعار:', error);
+  }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    }
+  }, [openSemester, academicYear, userData]);
 
   const handleCloseSemester = useCallback(async (semester, password) => {
-    await closeSemester(semester, password);
-    setShowConfirmModal(false);
-    setConfirmAction(null);
-    setMessage({ type: 'success', text: `✅ تم إغلاق الفصل ${semester === 1 ? 'الأول' : 'الثاني'} بنجاح!` });
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-  }, [closeSemester]);
+    try {
+      await closeSemester(semester, password);
+      setShowConfirmModal(false);
+      setConfirmAction(null);
+      setMessage({ type: 'success', text: `✅ تم إغلاق الفصل ${semester === 1 ? 'الأول' : 'الثاني'} بنجاح!` });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+      // ✅ إرسال إشعار لجميع المعلمين
+  try {
+    await notifySemesterClosed(semester, academicYear, userData?.fullName || 'الإدارة');
+    console.log(`✅ تم إرسال إشعار إغلاق الفصل ${semester} لجميع المعلمين`);
+  } catch (error) {
+    console.error('❌ خطأ في إرسال الإشعار:', error);
+  }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    }
+  }, [closeSemester, academicYear, userData]);
 
   const handleCloseYear = useCallback(async (password) => {
-    await closeAcademicYear(password);
-    setShowConfirmModal(false);
-    setConfirmAction(null);
-    setMessage({ type: 'success', text: `✅ تم إغلاق العام الدراسي ${academicYear} بنجاح!` });
-    setTimeout(() => setMessage({ type: '', text: '' }), 3000);
-  }, [closeAcademicYear, academicYear]);
+    try {
+      await closeAcademicYear(password);
+      setShowConfirmModal(false);
+      setConfirmAction(null);
+      setMessage({ type: 'success', text: `✅ تم إغلاق العام الدراسي ${academicYear} بنجاح!` });
+      setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+       // ✅ إرسال إشعار لجميع المعلمين
+  try {
+    await notifyYearClosed(academicYear, userData?.fullName || 'الإدارة');
+    console.log(`✅ تم إرسال إشعار إغلاق العام ${academicYear} لجميع المعلمين`);
+  } catch (error) {
+    console.error('❌ خطأ في إرسال الإشعار:', error);
+  }
+    } catch (error) {
+      setMessage({ type: 'error', text: error.message });
+    }
+  }, [closeAcademicYear, academicYear, userData]);
 
   // ====== حالة الإغلاق ======
   const isSemesterClosed = selectedSemester === 1 ? isSemester1Closed : isSemester2Closed;
@@ -558,10 +673,12 @@ export default function GradesManager() {
         academicYear={academicYear}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-        classes={classes}
-        subjects={subjects}
+         classes={sortedClasses}           // 👈 تم التغيير من classes إلى sortedClasses
+        subjects={sortedSubjects}         // 👈 تم التغيير من filteredSubjects إلى sortedSubjects
         isYearActive={isYearActive}
         isYearClosed={isYearClosed}
+        gradingConfig={gradingConfig}
+        selectedClassId={selectedClass}
       />
 
       {/* ====== تعليمات ====== */}
@@ -602,11 +719,15 @@ export default function GradesManager() {
           selectedClass={selectedClass}
           selectedSubject={selectedSubject}
           gradingConfig={gradingConfig}
+          dynamicGradeFields={dynamicGradeFields}
+          maxTotal={currentMaxTotal}
         />
       ) : (
         <div className="text-center py-12">
           <FileText className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-400 text-sm">الرجاء اختيار مادة لعرض العلامات</p>
+          <p className="text-slate-400 text-sm">
+            {!selectedClass ? 'الرجاء اختيار صف أولاً' : 'الرجاء اختيار مادة'}
+          </p>
         </div>
       )}
 

@@ -1,9 +1,9 @@
-// src/components/admin/GradesManager/components/GradeRow.jsx
+// src/components/teacher/components/TeacherGradeRow.jsx
 import React, { memo, useMemo } from 'react';
-import { GRADE_FIELDS } from '../constants/gradeFields';
-import GradeCell from './GradeCell';
+import { GRADE_FIELDS } from '../../admin/GradesManager/constants/gradeFields';
+import TeacherGradeCell from './TeacherGradeCell';
 
-const GradeRow = memo(({
+const TeacherGradeRow = memo(({
   student,
   getFieldValue,
   startEdit,
@@ -17,10 +17,10 @@ const GradeRow = memo(({
   isSemesterClosed,
   tempGrades,
   selectedSubject,
-  selectedClass,
   gradingConfig,
-  dynamicGradeFields,
-  maxTotal
+  getSubjectMaxTotal,
+  getFieldMax,
+  dynamicGradeFields
 }) => {
   // ✅ استخدام الحقول الديناميكية
   const fieldsToRender = dynamicGradeFields || GRADE_FIELDS;
@@ -34,6 +34,8 @@ const GradeRow = memo(({
     return result;
   }, [student.id, getFieldValue, fieldsToRender]);
 
+  const maxTotal = getSubjectMaxTotal();
+  
   // ✅ حساب المجموع
   const total = useMemo(() => {
     let sum = 0;
@@ -45,9 +47,7 @@ const GradeRow = memo(({
 
   // ✅ حساب النسبة المئوية والتقدير
   const gradeInfo = useMemo(() => {
-    const maxTotalValue = maxTotal || 100;
-    const percentage = maxTotalValue > 0 ? (total / maxTotalValue) * 100 : 0;
-    
+    const percentage = maxTotal > 0 ? (total / maxTotal) * 100 : 0;
     if (percentage >= 90) return { label: 'ممتاز', key: 'A', color: 'text-emerald-400 bg-emerald-500/10' };
     if (percentage >= 80) return { label: 'جيد جداً', key: 'B', color: 'text-blue-400 bg-blue-500/10' };
     if (percentage >= 70) return { label: 'جيد', key: 'C', color: 'text-amber-400 bg-amber-500/10' };
@@ -55,7 +55,6 @@ const GradeRow = memo(({
     return { label: 'ضعيف', key: 'F', color: 'text-rose-400 bg-rose-500/10' };
   }, [total, maxTotal]);
 
-  // ✅ التحقق من وجود تغييرات
   const hasChanges = useMemo(() => {
     return fieldsToRender.some(f => tempGrades[`${student.id}_${f.key}`] !== undefined);
   }, [student.id, tempGrades, fieldsToRender]);
@@ -69,7 +68,7 @@ const GradeRow = memo(({
       </td>
       {fieldsToRender.map(field => (
         <td key={field.key} className="p-2 text-center">
-          <GradeCell
+          <TeacherGradeCell
             studentId={student.id}
             field={field.key}
             maxValue={field.max || 0}
@@ -89,7 +88,7 @@ const GradeRow = memo(({
       ))}
       <td className="p-3 text-center font-bold text-emerald-400">
         {total}
-        <span className="text-[9px] text-slate-500 block">من {maxTotal || 100}</span>
+        <span className="text-[9px] text-slate-500 block">من {maxTotal}</span>
       </td>
       <td className="p-3 text-center">
         <span className={`px-2 py-1 rounded-full text-xs font-bold ${gradeInfo.color}`}>
@@ -100,6 +99,6 @@ const GradeRow = memo(({
   );
 });
 
-GradeRow.displayName = 'GradeRow';
+TeacherGradeRow.displayName = 'TeacherGradeRow';
 
-export default GradeRow;
+export default TeacherGradeRow;

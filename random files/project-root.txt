@@ -1,0 +1,172 @@
+project-root/
+│
+├── .env                                 # متغيرات البيئة
+├── .gitignore                           # ملف تجاهل Git
+├── oxlintrc.json                        # إعدادات OXLint
+├── cors.json                            # إعدادات CORS
+├── index.html                           # ملف HTML الرئيسي
+├── package-lock.json                    # قفل الاعتماديات
+├── package.json                         # ملف الاعتماديات
+├── postcss.config.js                    # إعدادات PostCSS
+├── README.md                            # ملف التوثيق
+├── tailwind.config.js                   # إعدادات Tailwind CSS
+├── vite.config.js                       # إعدادات Vite
+│
+├── public/                              # الملفات العامة
+│   └── (ملفات ثابتة)
+│
+└── src/                                 # المجلد الرئيسي للكود المصدري
+    │
+    ├── assets/                          # الأصول (الصور، الخطوط)
+    │   └── (ملفات SVG, صور)
+    │
+    ├── components/                      # مكونات واجهة المستخدم
+    │   │
+    │   ├── admin/                       # مكونات المدير
+    │   │   │
+    │   │   ├── GradesManager/           # 📁 إدارة الدرجات (مجلد متكامل)
+    │   │   │   │
+    │   │   │   ├── components/          # مكونات داخلية
+    │   │   │   │   ├── ConfirmModal.jsx
+    │   │   │   │   ├── GradeCell.jsx
+    │   │   │   │   ├── GradeFilters.jsx
+    │   │   │   │   ├── GradeRow.jsx
+    │   │   │   │   ├── GradeSummary.jsx
+    │   │   │   │   ├── GradeTable.jsx
+    │   │   │   │   └── YearModal.jsx
+    │   │   │   │
+    │   │   │   ├── constants/           # ثوابت خاصة
+    │   │   │   │   └── gradeFields.js
+    │   │   │   │
+    │   │   │   ├── hooks/               # خطافات خاصة
+    │   │   │   │   ├── useGradeEditing.js
+    │   │   │   │   └── useSchoolSettings.js
+    │   │   │   │
+    │   │   │   ├── utils/               # أدوات مساعدة
+    │   │   │   │   ├── gradeCalculations.js
+    │   │   │   │   └── printUtils.js
+    │   │   │   │
+    │   │   │   ├── GradesManager.jsx    # المكون الرئيسي
+    │   │   │   ├── GradingConfigManager.jsx  # إعدادات التقييم
+    │   │   │   └── guide.html           # ⚠️ يجب نقله إلى public/
+    │   │   │
+    │   │   ├── StudentsManager/         # 📁 إدارة الطلاب
+    │   │   │   └── components/          # مكونات داخلية
+    │   │   │       └── PromoteStudentsModal.jsx
+    │   │   │
+    │   │   ├── AdminDashboard.jsx       # لوحة تحكم المدير
+    │   │   ├── AdminInfo.jsx            # معلومات المدير
+    │   │   ├── AdminInfoFields.jsx      # حقول معلومات المدير
+    │   │   ├── AdminPermissions.jsx     # صلاحيات المدير
+    │   │   ├── AttendanceManager.jsx    # إدارة الحضور
+    │   │   ├── BehaviorManager.jsx      # إدارة السلوك
+    │   │   ├── CertificateGenerator.jsx # إنشاء الشهادات
+    │   │   ├── ClassesManager.jsx       # إدارة الصفوف
+    │   │   ├── ClassTeacherManager.jsx  # إدارة معلمي الصفوف
+    │   │   ├── GradesViewer.jsx         # عرض الدرجات
+    │   │   ├── ImportStudents.jsx       # استيراد الطلاب
+    │   │   ├── ImportTeachers.jsx       # استيراد المعلمين
+    │   │   ├── NotesManager.jsx         # إدارة الملاحظات
+    │   │   ├── PeriodSettings.jsx       # إعدادات الحصص
+    │   │   ├── PromoteStudentsModal.jsx # ⚠️ مكرر (موجود في StudentsManager)
+    │   │   ├── ScheduleManager.jsx      # إدارة الجدول
+    │   │   ├── SchoolInfo.jsx           # معلومات المدرسة
+    │   │   ├── SchoolInfoFields.jsx     # حقول معلومات المدرسة
+    │   │   ├── StudentsManager.jsx      # ⚠️ مكرر (يجب دمجه مع المجلد)
+    │   │   ├── SubjectsManager.jsx      # إدارة المواد
+    │   │   └── TeachersManager.jsx      # إدارة المعلمين
+    │   │
+    │   ├── auth/                        # مكونات المصادقة
+    │   │   └── Login.jsx                # صفحة تسجيل الدخول
+    │   │
+    │   ├── common/                      # مكونات مشتركة
+    │   │   ├── ConfirmDialog.jsx        # نافذة تأكيد
+    │   │   ├── EmptyState.jsx           # حالة فارغة
+    │   │   ├── Header.jsx               # رأس الصفحة
+    │   │   ├── Layout.jsx               # تخطيط الصفحة
+    │   │   ├── LoadingSpinner.jsx       # مؤشر التحميل
+    │   │   ├── ProtectedRoute.jsx       # حماية المسارات
+    │   │   └── Sidebar.jsx              # القائمة الجانبية
+    │   │
+    │   ├── student/                     # مكونات الطالب
+    │   │   ├── AskQuestion.jsx          # طرح سؤال
+    │   │   ├── AttendanceView.jsx       # عرض الحضور
+    │   │   ├── GradesView.jsx           # عرض الدرجات
+    │   │   ├── LiveLesson.jsx           # درس مباشر
+    │   │   ├── StudentDashboard.jsx     # لوحة تحكم الطالب
+    │   │   ├── StudentInfo.jsx          # معلومات الطالب
+    │   │   └── SubjectsView.jsx         # عرض المواد
+    │   │
+    │   └── teacher/                     # مكونات المعلم
+    │       │
+    │       ├── curriculum/              # المناهج الدراسية
+    │       │   ├── CurriculumWizard.jsx # معالج المنهج
+    │       │   ├── ExamBuilder.jsx      # بناء الامتحانات
+    │       │   └── LessonBuilder.jsx    # بناء الدروس
+    │       │
+    │       ├── dashboard/               # لوحة تحكم المعلم
+    │       │   ├── DailySchedule.jsx    # الجدول اليومي
+    │       │   ├── DashboardHome.jsx    # الصفحة الرئيسية
+    │       │   ├── Notifications.jsx    # الإشعارات
+    │       │   └── StatsCards.jsx       # بطاقات الإحصائيات
+    │       │
+    │       ├── exams/                   # الامتحانات
+    │       │   ├── ExamsPage.jsx        # صفحة الامتحانات
+    │       │   └── ExamStatistics.jsx   # إحصائيات الامتحان
+    │       │
+    │       ├── live/                    # الحصص المباشرة
+    │       │   ├── LessonEditor.jsx     # محرر الدرس
+    │       │   ├── LessonPreview.jsx    # معاينة الدرس
+    │       │   ├── LiveControls.jsx     # أدوات التحكم المباشرة
+    │       │   ├── LiveSidebar.jsx      # الشريط الجانبي المباشر
+    │       │   └── Presentation.jsx     # عرض تقديمي
+    │       │
+    │       └── management/              # إدارة المعلم
+    │           ├── AIGenerator.jsx      # ⚠️ مكرر
+    │           ├── ClassesManager.jsx   # إدارة الصفوف
+    │           ├── StudentsManager.jsx  # إدارة الطلاب
+    │           ├── StudentsPerformance.jsx # أداء الطلاب
+    │           ├── TeacherDashboard.jsx # لوحة تحكم المعلم
+    │           └── TeacherInfo.jsx      # معلومات المعلم
+    │
+    ├── context/                         # سياقات React
+    │   └── AuthContext.jsx              # سياق المصادقة
+    │
+    ├── hooks/                           # خطافات React المخصصة
+    │   ├── index.js                     # نقطة التصدير
+    │   ├── useAuth.js                   # خطاف المصادقة
+    │   ├── useFirestore.js              # خطاف Firestore
+    │   ├── useLocalStorage.js           # خطاف التخزين المحلي
+    │   ├── usePermissions.js            # خطاف الصلاحيات
+    │   ├── useRealtime.js               # خطاف التحديثات اللحظية
+    │   └── useSchoolSettings.js         # خطاف إعدادات المدرسة
+    │
+    ├── services/                        # طبقة الخدمات
+    │   ├── index.js                     # نقطة التصدير
+    │   ├── adminService.js              # خدمات المدير
+    │   ├── aiService.js                 # خدمات الذكاء الاصطناعي
+    │   ├── attendanceService.js         # خدمات الحضور
+    │   ├── auth.js                      # خدمات المصادقة
+    │   ├── certificateService.js        # خدمات الشهادات
+    │   ├── classService.js              # خدمات الصفوف
+    │   ├── examService.js               # خدمات الامتحانات
+    │   ├── firebase.js                  # إعدادات Firebase
+    │   ├── gradeService.js              # خدمات الدرجات
+    │   ├── lessonService.js             # خدمات الدروس
+    │   ├── scheduleService.js           # خدمات الجدول
+    │   ├── studentService.js            # خدمات الطلاب
+    │   ├── subjectService.js            # خدمات المواد
+    │   ├── teacherService.js            # خدمات المعلمين
+    │   └── userService.js               # خدمات المستخدمين
+    │
+    ├── utils/                           # الأدوات المساعدة
+    │   ├── index.js                     # نقطة التصدير
+    │   ├── constants.js                 # الثوابت العامة
+    │   ├── helpers.js                   # الدوال المساعدة
+    │   └── ACE_logo.svg                 # ⚠️ يجب نقله إلى assets/
+    │
+    ├── App.css                          # أنماط التطبيق الرئيسية
+    ├── App.jsx                          # المكون الجذري للتطبيق
+    ├── index.css                        # الأنماط العامة
+    ├── index.js                         # نقطة الدخول
+    └── main.jsx                         # نقطة الدخول الرئيسية

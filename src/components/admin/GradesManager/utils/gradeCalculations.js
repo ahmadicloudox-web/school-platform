@@ -1,9 +1,8 @@
 // src/components/admin/GradesManager/utils/gradeCalculations.js
-
 import { 
   GRADE_FIELD_KEYS, 
   DEFAULT_GRADING_CONFIG,
-  getTotalMaxForSubject,  // ✅ استيراد من gradeFields
+  getTotalMaxForSubject,
   calculateTotalFromFields,
   getGradeFieldsForSubject
 } from '../constants/gradeFields';
